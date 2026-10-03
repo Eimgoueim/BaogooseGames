@@ -84,6 +84,9 @@
     line-height:1;cursor:pointer;backdrop-filter:blur(6px);-webkit-backdrop-filter:blur(6px);padding:0}
   .bgm-btn:hover{background:rgba(24,18,44,.6)}
   .slot.locked{opacity:.45;filter:grayscale(.8);cursor:not-allowed}
+  .slots-float .slot.danger{outline:2px solid #ff4d4d;outline-offset:-1px;border-radius:6px;
+    animation:dangerPulse 1.1s ease-in-out infinite}
+  @keyframes dangerPulse{0%,100%{box-shadow:0 0 0 0 rgba(255,77,77,.55)}50%{box-shadow:0 0 0 3px rgba(255,77,77,.15)}}
   .slot.locked em{font-size:15px}
   .slot.empty em{font-style:normal;font-size:20px}
   .slot .sart{height:40px;display:flex;align-items:flex-end;justify-content:center}
@@ -190,6 +193,35 @@
   @keyframes popIn{from{opacity:0;transform:translateY(14px) scale(.97)}to{opacity:1;transform:none}}
   .mini-head{display:flex;justify-content:space-between;align-items:center;font-weight:900;margin-bottom:12px;font-size:15.5px;gap:10px}
   .mini-head span{color:var(--purple);font-size:12.5px;font-weight:700;text-align:right}
+  /* ---- 领养面板 ---- */
+  .species-list{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:8px;
+    max-height:44vh;overflow:auto;padding:2px;margin:2px 0 4px}
+  .sp{display:flex;gap:8px;align-items:center;padding:8px;border-radius:14px;cursor:pointer;
+    background:rgba(255,255,255,.55);border:1.5px solid rgba(120,100,180,.22);
+    transition:transform .12s ease,box-shadow .12s ease}
+  .sp:hover{transform:translateY(-2px);box-shadow:0 8px 18px rgba(70,50,140,.16)}
+  .sp.cur{border-color:#4fc9a8;background:rgba(79,201,168,.14)}
+  .sp.locked{opacity:.55;filter:grayscale(.5)}
+  .sp .spart{flex:none;width:50px;display:flex;align-items:center;justify-content:center}
+  .sp .spinfo{min-width:0}
+  .sp .spnm{font-size:13px;font-weight:900;display:flex;align-items:center;gap:5px;flex-wrap:wrap}
+  .sp .sptag{font-size:10px;font-weight:800;padding:1px 6px;border-radius:999px;background:rgba(139,123,255,.18);color:#6a5bd0}
+  .sp .sptag.lim{background:rgba(255,143,177,.22);color:#c2477a}
+  .sp .lock{font-size:10px;font-weight:800;color:#2c8f74;background:rgba(79,201,168,.2);border-radius:999px;padding:1px 6px}
+  .sp .spds{font-size:11px;color:var(--muted);line-height:1.5;margin-top:3px}
+  body[data-theme="night"] .sp{background:rgba(255,255,255,.08);border-color:rgba(255,255,255,.16)}
+  body[data-theme="night"] .sp .spds{color:#cfc9e8}
+  /* ---- 已离世的伙伴 ---- */
+  .grave-box{display:none}
+  .grave-box.on{display:block;margin:0 0 10px;padding:8px 10px;border-radius:14px;background:rgba(60,20,40,.35);
+    border:1px solid rgba(255,90,120,.45)}
+  .grave-box .gb-title{font-size:12.5px;font-weight:900;color:#ffc9d4;margin-bottom:6px;line-height:1.5}
+  .grave-box .gb-row{display:flex;align-items:center;gap:8px;margin:5px 0;font-size:12.5px;color:#fff}
+  .grave-box .gb-row .gb-name{font-weight:900}
+  .grave-box .gb-row .gb-sub{opacity:.82;font-size:11.5px}
+  .grave-box .gb-btn{margin-left:auto;border:0;border-radius:10px;padding:5px 10px;font-size:12px;font-weight:900;cursor:pointer;
+    background:linear-gradient(180deg,#8be0c6,#4fc9a8);color:#123}
+  .grave-box .gb-btn:disabled{opacity:.5;cursor:default;background:rgba(255,255,255,.2);color:#fff}
   .mini-foot{display:flex;justify-content:space-between;align-items:center;font-size:12px;color:var(--muted);margin-top:12px;gap:10px}
   .mini-result{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;text-align:center;padding:18px}
   .mini-result p{margin:0;font-size:14px;line-height:1.75}
@@ -708,6 +740,21 @@
 </div>
 
 <!-- 抽卡结果 -->
+<!-- 领养宠物 -->
+<div class="overlay" id="adoptOverlay">
+  <div class="mini-card">
+    <div class="mini-head"><b>🐾 领养宠物</b><span id="adoptHint">最多同时养 3 只</span></div>
+    <div class="grave-box" id="graveBox"></div>
+    <div class="species-list" id="speciesList"></div>
+    <div class="mini-foot">
+      <span>首次选择＝选定初始宠物 · 之后每升 1 级解锁 1 个栏位 · 限定宠物只能靠抽卡解锁</span>
+      <div class="result-btns">
+        <button class="btn tiny" data-action="adoptclose">关闭</button>
+      </div>
+    </div>
+  </div>
+</div>
+
 <div class="overlay" id="gachaOverlay">
   <div class="mini-card" id="gachaCard">
     <div class="mini-head"><b>🎰 抽卡结果</b><span id="gachaSummary"></span></div>
@@ -1065,6 +1112,12 @@
   const el = id => document.getElementById(id);
   const clamp = (v, lo = 0, hi = 100) => Math.max(lo, Math.min(hi, v));
   const rand = (a, b) => a + Math.floor(Math.random() * (b - a + 1));
+  const DEATH_TICKS = 180;            // 生病（健康 ≤0）持续 180 刻（15 分钟）没人管 → 离世
+  const BENCH_CRY_MS = 30 * 1000;     // 在家饿着的宠物多久叫一次
+  const REVIVE_COST = 500;            // 复活花费信用点
+  const REVIVE_SHARDS = 10;           // 限定宠物复活需要 10 碎片
+  const SHARDS_ON_DEATH = 10;         // 限定宠物离世后变成 10 碎片
+  const REVIVE_MIN_LV = 10;           // 到过 Lv.10 的才有机会复活
   const POOP_MS = 5 * 60 * 1000;      // 每 5 分钟拉一坨
   const POOP_WARN_MS = 9 * 1000;      // 拉之前的预警：抖动 + 大叫
   const POOP_MAX = 6;                 // 地上最多同时几坨
@@ -1096,7 +1149,7 @@
       inv: { basic: 3 }, hasToy: false, seenItems: {}, wear: {}, placed: {}, furnOwn: {}, edit: false, sel: '',
       theme: 'sakura', accent: '', camYaw: 0, camZoom: 1,
       best: {},
-      decos: {}, collection: [], picked: false, bgm: true, poops: [], banner: 'whale', pity: 0,
+      decos: {}, collection: [], picked: false, bgm: true, poops: [], grave: [], shards: {}, banner: 'whale', pity: 0,
       title: '', decor: false, memoUnlocked: false, gearGiven: false,
       pulls: 0, lastTick: Date.now(), workReady: 0
     };
@@ -2679,6 +2732,14 @@
       });
     }
     st.bgm = !(d && d.bgm === false);                   // 背景音乐开关（老档默认开）
+    st.grave = Array.isArray(d && d.grave) ? d.grave.slice(0, 12).map(g => ({
+      species: SPECIES[g && g.species] ? g.species : 'dragon',
+      name: (g && typeof g.name === 'string') ? g.name : '小伙伴',
+      level: Math.max(1, Number(g && g.level) || 1),
+      affRank: Math.max(1, Number(g && g.affRank) || 1),
+      at: Number(g && g.at) || Date.now()
+    })) : [];                                         // 已离世的伙伴
+    st.shards = (d && d.shards && typeof d.shards === 'object') ? Object.assign({}, d.shards) : {};   // 限定宠物碎片
     st.poops = Array.isArray(d && d.poops)
       ? d.poops.slice(-POOP_MAX).map(q => ({
           lx: clamp(Number(q && q.lx) || 0.5, PET_X0, PET_X1),
@@ -2923,6 +2984,69 @@
     return woke;
   }
 
+  function alivePets() { return (state.pets || []).filter(q => !q.dead); }
+  function petNeedsHelp(p) {                              // 状态很差，需要照顾
+    return p.hunger < 25 || p.health <= 0 || p.clean < 15 || p.mood < 20;
+  }
+  function petCritical(p) {                               // 已经很危险（红框 + 会叫）
+    return p.health <= 0 || p.hunger < 12 || (p.sickT || 0) > 0;
+  }
+  function shardOf(key) { return (state.shards && state.shards[key]) | 0; }
+  function killPet(p, reason) {                           // 离世：移出队伍、进墓碑、限定变碎片
+    if (!state.pets || state.pets.length <= 1) return false;      // 最后一只不会被放任到死
+    const idx = state.pets.indexOf(p);
+    if (idx < 0) return false;
+    const sp2 = spOf(p);
+    if (!Array.isArray(state.grave)) state.grave = [];
+    state.grave.push({ species: p.species, name: p.name, level: p.level | 0, affRank: p.affRank | 0, at: Date.now() });
+    if (state.grave.length > 12) state.grave.shift();
+    state.pets.splice(idx, 1);
+    state.active = Math.max(0, Math.min(state.active, state.pets.length - 1));
+    if (sp2.limited) {
+      if (!state.shards) state.shards = {};
+      state.shards[p.species] = shardOf(p.species) + SHARDS_ON_DEATH;
+    }
+    toast('💀 ' + p.name + ' ' + (reason || '撑不住了') + '…已离世' + (sp2.limited ? '（变成 ' + SHARDS_ON_DEATH + ' 个碎片）' : '') + '，去 🐾 领养面板看看');
+    if (state.grave.some(g => g.level >= REVIVE_MIN_LV)) toast('✨ 到过 Lv.' + REVIVE_MIN_LV + ' 的伙伴可以在领养面板复活');
+    render(); save();
+    return true;
+  }
+  function revivePet(i) {                                 // 复活墓碑里的伙伴
+    const g = (state.grave || [])[i];
+    if (!g) return;
+    if ((g.level | 0) < REVIVE_MIN_LV) { toast('🪦 ' + g.name + ' 只到 Lv.' + g.level + '，需要到过 Lv.' + REVIVE_MIN_LV + ' 才能复活'); return; }
+    const sp2 = SPECIES[g.species] || SPECIES.dragon;
+    const needShard = sp2.limited ? REVIVE_SHARDS : 0;
+    if (state.coins < REVIVE_COST) { toast('💰 复活需要 ' + REVIVE_COST + ' 信用点（不够）'); return; }
+    if (needShard && shardOf(g.species) < needShard) { toast('🧩 还缺碎片：' + sp2.name + ' 需要 ' + needShard + ' 个（当前 ' + shardOf(g.species) + '）'); return; }
+    state.coins -= REVIVE_COST;
+    if (needShard) state.shards[g.species] = shardOf(g.species) - needShard;
+    const np = makePet(g.species);
+    np.name = g.name; np.level = Math.max(1, g.level | 0);
+    const old = state.pets[state.active];
+    np.hunger = 55; np.mood = 50; np.clean = 55; np.energy = 60; np.health = 55;
+    np.affRank = Math.max(1, g.affRank | 0);
+    if (!old || (state.pets.length >= slotsUnlocked())) {                 // 没位置就先替掉出战的那只
+      if (!state.pets.length) state.pets.push(np);
+      else state.pets[state.active] = np;
+    } else state.pets.push(np);
+    state.grave.splice(i, 1);
+    state.active = Math.max(0, state.pets.indexOf(np));
+    poopFix(np);
+    toast('✨ ' + np.name + ' 复活了！欢迎回来（Lv.' + np.level + '）');
+    render(); save();
+  }
+  function benchCries() {                                 // 在家没被照顾的宠物会叫
+    const now = Date.now();
+    (state.pets || []).forEach((q, i) => {
+      if (i === state.active || q.dead) return;
+      if (!petCritical(q)) return;
+      if (now - (q.cryAt || 0) < BENCH_CRY_MS) return;
+      q.cryAt = now;
+      playCry();                                          // 叫一声（走音效总线，比音乐响）
+      toast('😿 ' + q.name + ' 在家饿得直叫…（点上方头像切过去看看）');
+    });
+  }
   function poopFix(p) {                                 // 每只宠物的拉屎时间（老档/离线兜底）
     const now = Date.now();
     if (!p.poopNext || !isFinite(p.poopNext)) p.poopNext = now + POOP_MS;
@@ -2969,7 +3093,23 @@
       if (stepPet(p, 'active')) toast('☀️ ' + p.name + ' 睡饱啦，精神满满！');
       addExp(2);
       addAffinity(p.asleep ? 0.4 : 0.3);
-      state.pets.forEach((q, i) => { if (i !== state.active) stepPet(q, 'bench'); poopFix(q); });
+      state.pets.forEach((q, i) => {
+        if (i !== state.active) stepPet(q, 'bench');
+        poopFix(q);
+        // 长期没人照顾（健康/饱食/清洁/心情任一长期过低）才会计时；一旦被照顾就清零
+        const bad = q.health <= 5 || q.hunger < 15 || q.clean < 12 || q.mood < 10;
+        q.sickT = bad ? (q.sickT || 0) + 1 : 0;
+      });
+      benchCries();                                          // 在家的宠物饿了会叫
+      state.pets.slice().forEach(q => {
+        if ((q.sickT || 0) >= DEATH_TICKS) {
+          if (state.pets.length > 1) killPet(q, '生病太久没人管');
+          else if (!q.warnedDead) {                          // 最后一只：只警告不带走
+            q.warnedDead = true;
+            toast('🚨 ' + q.name + ' 已经撑不住了！喂点吃的、洗个澡或让它睡觉，再不管会有危险');
+          }
+        }
+      });
       if ((state.poops || []).length) {                   // 地上有屎：清洁度与心情持续下滑
         p.clean = clamp(p.clean - 0.6);
         p.mood = clamp(p.mood - 0.3);
@@ -4488,8 +4628,9 @@ function rlWire(cv) {
       }
       const qsp = spOf(q);
       const hp = Math.round(q.health), en = Math.round(q.energy);
+      const danger = (i !== state.active) && petCritical(q);
       const needCare = (i !== state.active) && (q.hunger < 30 || q.health <= 0);
-      slots.push('<div class="slot' + (i === state.active ? ' cur' : '') + (needCare ? ' warn' : '') +
+      slots.push('<div class="slot' + (i === state.active ? ' cur' : '') + (danger ? ' danger' : (needCare ? ' warn' : '')) +
           '" data-action="switch:' + i + '" title="' + q.name + ' Lv.' + q.level + ' · ❤️' + hp + '% ⚡' + en + '%">' +
         '<div class="sart">' + artThumb(q, 20) + '</div>' +
         '<div class="snm">' + q.name + '</div>' +
@@ -4760,7 +4901,7 @@ function rlWire(cv) {
     const list = el('speciesList');
     if (list) {
       list.innerHTML = Object.keys(SPECIES).map(k => {
-        const it = SPECIES[k], cnt = state.pets.filter(q => q.species === k).length;
+        const it = SPECIES[k], cnt = state.pets.filter(q => q.species === k && !q.dead).length;
         const locked = it.limited && state.collection.indexOf(k) < 0;
         const art = locked ? '<span class="emo">❔</span>' : artThumb(makePet(k), 56);
         return '<div class="sp' + (cnt ? ' cur' : '') + (locked ? ' locked' : '') +
@@ -4772,6 +4913,26 @@ function rlWire(cv) {
           '<div class="spds">' + (locked ? '抽卡限定：去「🎰 抽卡」有 ' + PET_PCT + '% 概率获得' : it.desc) + '</div></div>' +
         '</div>';
       }).join('');
+      const gb = el('graveBox');
+      if (gb) {
+        const gs = state.grave || [];
+        if (!gs.length) { gb.className = 'grave-box'; gb.innerHTML = ''; }
+        else {
+          gb.className = 'grave-box on';
+          gb.innerHTML = '<div class="gb-title">🪦 已离世的伙伴（到过 Lv.' + REVIVE_MIN_LV + ' 可复活：💰' + REVIVE_COST +
+            '，限定宠物还需 🧩' + REVIVE_SHARDS + ' 碎片）</div>' + gs.map((g, i) => {
+              const sp2 = SPECIES[g.species] || SPECIES.dragon;
+              const sh = sp2.limited ? shardOf(g.species) : 0;
+              const canLv = (g.level | 0) >= REVIVE_MIN_LV;
+              const canPay = state.coins >= REVIVE_COST && (!sp2.limited || sh >= REVIVE_SHARDS);
+              const why = !canLv ? '只到 Lv.' + g.level : (!canPay ? (state.coins < REVIVE_COST ? '信用点不够' : '碎片不够') : '');
+              return '<div class="gb-row"><span>💀</span><span class="gb-name">' + g.name + '</span>' +
+                '<span class="gb-sub">' + sp2.name + ' · Lv.' + g.level + (sp2.limited ? ' · 🧩' + sh : '') + '</span>' +
+                '<button class="gb-btn" data-action="revive:' + i + '"' + (canLv && canPay ? '' : ' disabled') +
+                ' title="' + (why || '复活它') + '">' + (canLv && canPay ? '✨ 复活' : (canLv ? '条件不足' : 'Lv.' + REVIVE_MIN_LV + ' 才能复活')) + '</button></div>';
+            }).join('');
+        }
+      }
       el('adoptHint').textContent = !state.picked
       ? '首次选择：点一只作为你的初始宠物（之后升级解锁更多栏位）'
       : '队伍 ' + state.pets.length + '/' + slotsUnlocked() + ' · 点整张卡片即可领养' +
@@ -4795,6 +4956,7 @@ function rlWire(cv) {
         case 'adopt': return openAdopt();                  // 顶部 🐾：再点收起
         case 'adoptopen': return openAdopt(true);          // 「＋」/按钮：只打开（修：以前会误关）
         case 'bgm':       return bgToggle();               // 背景音乐开/关
+        case 'revive':    return revivePet(Number(arg) | 0);   // 复活已离世的伙伴
         case 'adoptpick': return adopt(arg);
         case 'adoptclose': return closeAdopt();
         case 'switch': return switchPet(Number(arg));
