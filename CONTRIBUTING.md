@@ -71,7 +71,7 @@ godot --headless --editor --path godot --quit
 godot --headless --path godot --script res://tests/test_saves.gd
 ```
 
-`F5`/`F6` 当前启动的是原版 Canvas 静态视觉预览，不代表完整 UI 一致性已经验证。
+`F5` 启动原生游戏主场景，已接入养成、抽卡、地牢、音频及存档；固定 Canvas 基准请运行 `parity_viewer.tscn`。完整 UI 视觉仍需人工验收，验证命令见 Godot README。
 
 ---
 

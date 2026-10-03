@@ -132,8 +132,33 @@ func _rebuild_dialog(opts: Dictionary) -> void:
 	_panel = PanelContainer.new()
 	_panel.custom_minimum_size = Vector2(minf(430.0, get_viewport_rect().size.x * 0.94), 0)
 	_panel.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
-	_panel.add_theme_stylebox_override("panel", UIStyle.panel_style(_color_var("--card", "#ffffff"), _color_var("--line", "#eceaf6"), 24))
+	var night := str(_current_state.get("theme", "")) == "night"
+	var panel_fill := Color(44.0 / 255.0, 34.0 / 255.0, 66.0 / 255.0, 0.32) if night else Color(1.0, 1.0, 1.0, 0.30)
+	var panel_frame := StyleBoxFlat.new()
+	panel_frame.bg_color = Color(1.0, 1.0, 1.0, 0.0)
+	panel_frame.border_color = Color(1.0, 1.0, 1.0, 0.5)
+	panel_frame.set_border_width_all(1)
+	panel_frame.set_corner_radius_all(24)
+	_panel.add_theme_stylebox_override("panel", panel_frame)
 	center.add_child(_panel)
+	var blur := ColorRect.new()
+	blur.name = "FrostedBlur"
+	blur.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	blur.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	var blur_material := ShaderMaterial.new()
+	blur_material.shader = load("res://shaders/frosted_glass.gdshader")
+	blur_material.set_shader_parameter("blur_radius", 12.0)
+	blur_material.set_shader_parameter("corner_radius", 24.0)
+	blur.material = blur_material
+	blur.resized.connect(_sync_blur_size.bind(blur, blur_material))
+	_panel.add_child(blur)
+	call_deferred("_sync_blur_size", blur, blur_material)
+	var tint := Panel.new()
+	tint.name = "FrostedTint"
+	tint.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	tint.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	tint.add_theme_stylebox_override("panel", UIStyle.panel_style(panel_fill, Color.TRANSPARENT, 24))
+	_panel.add_child(tint)
 	var margin := MarginContainer.new()
 	margin.add_theme_constant_override("margin_left", 16)
 	margin.add_theme_constant_override("margin_right", 16)
@@ -159,8 +184,65 @@ func _rebuild_dialog(opts: Dictionary) -> void:
 	actions.add_theme_constant_override("separation", 8)
 	_body.add_child(actions)
 	if not str(opts.get("confirmText", "")).is_empty():
-		actions.add_child(_button("取消", "dlgcancel"))
-	actions.add_child(_button(str(opts.get("confirmText", "知道了")), "dlgok"))
+		var cancel := _button("取消", "dlgcancel")
+		_style_dialog_button(cancel, false)
+		actions.add_child(cancel)
+	var confirm := _button(str(opts.get("confirmText", "知道了")), "dlgok")
+	_style_dialog_button(confirm, true)
+	actions.add_child(confirm)
+
+func _style_dialog_button(button: Button, primary: bool) -> void:
+	var fill := Color(1.0, 1.0, 1.0, 0.34)
+	var primary_style := _primary_dialog_button_style() if primary else null
+	for state in ["normal", "hover", "pressed", "focus", "disabled"]:
+		var style: StyleBox
+		if primary:
+			style = primary_style
+		else:
+			var flat := StyleBoxFlat.new()
+			flat.bg_color = fill
+			flat.set_corner_radius_all(10)
+			style = flat
+		style.content_margin_left = 12.0
+		style.content_margin_right = 12.0
+		style.content_margin_top = 7.0
+		style.content_margin_bottom = 7.0
+		button.add_theme_stylebox_override(state, style)
+	button.add_theme_color_override("font_color", Color.WHITE if primary else _color_var("--ink", "#2c2b3d"))
+	button.add_theme_color_override("font_hover_color", Color.WHITE if primary else _color_var("--ink", "#2c2b3d"))
+	button.add_theme_color_override("font_pressed_color", Color.WHITE if primary else _color_var("--ink", "#2c2b3d"))
+
+func _primary_dialog_button_style() -> StyleBoxTexture:
+	const width := 96
+	const height := 40
+	const radius := 10.0
+	var image := Image.create(width, height, false, Image.FORMAT_RGBA8)
+	var left := Color(139.0 / 255.0, 123.0 / 255.0, 1.0, 0.72)
+	var right := Color(1.0, 143.0 / 255.0, 177.0 / 255.0, 0.72)
+	var half := Vector2(width * 0.5, height * 0.5)
+	for y in range(height):
+		for x in range(width):
+			var q := Vector2(absf(x + 0.5 - half.x), absf(y + 0.5 - half.y)) - half + Vector2.ONE * radius
+			var distance := Vector2(maxf(q.x, 0.0), maxf(q.y, 0.0)).length() + minf(maxf(q.x, q.y), 0.0) - radius
+			var coverage := clampf((1.0 - distance) * 0.5, 0.0, 1.0)
+			var color := left.lerp(right, float(x + y) / float(width + height - 2))
+			color.a *= coverage
+			image.set_pixel(x, y, color)
+	var style := StyleBoxTexture.new()
+	style.texture = ImageTexture.create_from_image(image)
+	style.texture_margin_left = radius
+	style.texture_margin_right = radius
+	style.texture_margin_top = radius
+	style.texture_margin_bottom = radius
+	style.content_margin_left = 12.0
+	style.content_margin_right = 12.0
+	style.content_margin_top = 7.0
+	style.content_margin_bottom = 7.0
+	return style
+
+func _sync_blur_size(blur: ColorRect, material: ShaderMaterial) -> void:
+	if is_instance_valid(blur) and is_instance_valid(material):
+		material.set_shader_parameter("rect_size", blur.size)
 
 func _build_theme() -> void:
 	var current_theme := str(_current_state.get("theme", "sakura"))
@@ -224,6 +306,7 @@ func _build_theme() -> void:
 	if accent.is_empty():
 		accent = str(_vars.get("--purple", "#8b7bff"))
 	_accent_input.color = Color.from_string(accent, Color("#8b7bff"))
+	_accent_input.color_changed.connect(func(color: Color) -> void: action_requested.emit("accentlive:#" + color.to_html(false)))
 	accent_row.add_child(_accent_input)
 	accent_row.add_child(_button("应用", "accentapply"))
 	accent_row.add_child(_button("恢复默认", "accentclear"))
@@ -241,7 +324,7 @@ func _build_adopt() -> void:
 	_add_header("🐾 领养宠物", hint)
 	var grave: Array = _current_state.get("grave", [])
 	if not grave.is_empty():
-		_body.add_child(UIStyle.label("🪦 已离世的伙伴（到过 Lv.10 可复活：💰500，限定宠物还需 🧩10 碎片）", 12, _ink()))
+		_body.add_child(UIStyle.label("🪦 已离世的伙伴（玩家等级 Lv.10 可复活：💰500，限定宠物还需 🧩10 碎片）· 当前玩家等级 Lv.%d" % int(_current_state.get("lv", 1)), 12, _ink()))
 		for i in grave.size():
 			_add_grave_row(grave[i], i)
 	var species_data: Dictionary = _catalog.get("SPECIES", {})
@@ -305,7 +388,8 @@ func _build_save() -> void:
 	var pets: Array = _current_state.get("pets", [])
 	var saved_at := _save_time_text()
 	_add_header("💾 存档", saved_at + " · %d/10 只宠物" % pets.size())
-	var row := HFlowContainer.new()
+	var row := GridContainer.new()
+	row.columns = 2
 	row.add_theme_constant_override("h_separation", 8)
 	row.add_theme_constant_override("v_separation", 8)
 	_body.add_child(row)
@@ -332,17 +416,18 @@ func _add_grave_row(entry: Variant, index: int) -> void:
 	var limited := bool(spec.get("limited", false))
 	var shards: Dictionary = _current_state.get("shards", {})
 	var shard_count := int(shards.get(entry.get("species", ""), 0))
-	var can_revive := lvl >= 10 and int(_current_state.get("coins", 0)) >= 500 and (not limited or shard_count >= 10)
+	var can_level := int(_current_state.get("lv", 1)) >= 10
+	var can_revive := can_level and int(_current_state.get("coins", 0)) >= 500 and (not limited or shard_count >= 10)
 	var row := HBoxContainer.new()
 	row.add_theme_constant_override("separation", 6)
 	_body.add_child(row)
-	var desc := "💀 %s · %s · Lv.%d" % [str(entry.get("name", "")), str(spec.get("name", "")), lvl]
+	var desc := "💀 %s · %s · 离世时 Lv.%d" % [str(entry.get("name", "")), str(spec.get("name", "")), lvl]
 	if limited:
 		desc += " · 🧩%d" % shard_count
 	var label: Label = UIStyle.label(desc, 11, _ink())
 	label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	row.add_child(label)
-	var btn := _button("✨ 复活" if can_revive else ("Lv.10 才能复活" if lvl < 10 else "条件不足"), "revive:%d" % index)
+	var btn := _button("✨ 复活" if can_revive else ("Lv.10 才能复活" if not can_level else "条件不足"), "revive:%d" % index)
 	btn.disabled = not can_revive
 	row.add_child(btn)
 
@@ -427,11 +512,7 @@ func _save_time_text() -> String:
 
 func _slots_unlocked() -> int:
 	var max_pets := int(_catalog.get("constants", {}).get("MAX_PETS", 10))
-	var best_level := 1
-	for pet in _current_state.get("pets", []):
-		if pet is Dictionary:
-			best_level = maxi(best_level, int(pet.get("level", 1)))
-	return maxi(1, mini(max_pets, best_level))
+	return maxi(1, mini(max_pets, int(_current_state.get("lv", 1))))
 
 func _pet_probability() -> String:
 	var rate := float(_catalog.get("constants", {}).get("PET_RATE", 0.015)) * 100.0

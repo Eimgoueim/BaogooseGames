@@ -5,7 +5,7 @@ const SAVE_VERSION := 1
 const SPECIES := ["dragon", "hoshino", "goose", "cat", "whale", "gpt", "claude", "gemini"]
 const STATUS_FIELDS := ["hunger", "mood", "clean", "energy", "health"]
 const PET_NUMBERS := ["level", "exp", "affRank", "affinity", "ageTicks", "born", "poopNext", "lx", "ly"]
-const ROOT_NUMBERS := ["coins", "points", "pointsTotal", "pulls", "camYaw", "camZoom", "pity", "lastTick", "workReady"]
+const ROOT_NUMBERS := ["coins", "points", "pointsTotal", "pulls", "camYaw", "camZoom", "pity", "lastTick", "workReady", "lv", "exp"]
 
 static func _finite_number(value: Variant) -> bool:
 	if typeof(value) != TYPE_INT and typeof(value) != TYPE_FLOAT:

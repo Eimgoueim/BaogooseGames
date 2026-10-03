@@ -15,6 +15,7 @@ func capture() -> void:
 		scene.set_process(false)
 		for argument in OS.get_cmdline_user_args():
 			if argument.begins_with("--action="): scene.handle(argument.trim_prefix("--action="))
+			if argument.begins_with("--wait="): await create_timer(float(argument.trim_prefix("--wait="))).timeout
 	await process_frame
 	await process_frame
 	await RenderingServer.frame_post_draw

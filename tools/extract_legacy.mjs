@@ -14,7 +14,7 @@ if (!script || !script.includes('  boot();')) throw new Error('原版启动入�
 script = script.replace('  boot();', `
   globalThis.legacy = {
     catalog: {SPECIES, SHOP, DECOS, WEAR, WEAR_SLOTS, WEAR_BACK, GACHA, POINT_SHOP,
-      THEMES, STATS, PLACE, DECO_PLACE, MENU, BANNERS, RL_SKILLS,
+      THEMES, STATS, PLACE, DECO_PLACE, MENU, BANNERS, LIMIT_KEYS, RL_SKILLS, PET_LINES, CRIES,
       constants: {TICK_MS, WORK_CD, MAX_PETS, PET_RATE, PITY_SMALL, PITY_BIG,
         SPOOK_AT_PITY, SPOOK_RATE, PULL_1, PULL_10, DUP_PET_PTS, DUP_DECO_PTS,
         DUP_WEAR_PTS, DEATH_TICKS, REVIVE_COST, REVIVE_SHARDS, SHARDS_ON_DEATH,

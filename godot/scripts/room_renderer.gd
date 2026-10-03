@@ -226,6 +226,8 @@ func pet(p: Dictionary, at: Vector2) -> void:
 			fill(x, at.y + head + bubble[1], bubble[2], bubble[2], color("#cfd9f5"))
 	elif pose == "sick":
 		for x in [12, 16]: fill(at.x + x, at.y + head - 7, 2, 5, color("#ef5b5b"))
+	elif visual.get("face", "") == "happy" and float(visual.get("hop", 0)) > 0.2:
+		for x in [-18, 16]: fill(at.x + x, at.y + head - 3, 2, 2, color("#ff8fb1"))
 	if annoyed:
 		for spike: Array in [[13, -6], [17, -3], [17, -10]]:
 			fill(at.x + spike[0], at.y + head + spike[1], 2, 2, color("#ef5b5b"))
@@ -308,12 +310,21 @@ func build(current: Dictionary, data: Dictionary, drawings: Dictionary, screen: 
 		var at := pet_at(p)
 		at.y -= js_round(float(visual.get("hop", 0)) * 7)
 		if visual.get("bob", false) and not p.get("asleep", false): at.y -= 1
+		if p.get("poopWarn", false) and not p.get("asleep", false): at.y -= int(js_round(time * 26)) % 2
 		if float(visual.get("bath", 0)) > 0:
 			append_art(art.effects.bath_back, at + Vector2(0, 1))
 			append_art(art.pets[p.species][str(stage(p)) + "_happy"], at + Vector2(0, 3 + js_round(sin(time * 4))))
 			append_art(art.effects.bath_front, at + Vector2(0, 1))
+			for bubble: Dictionary in visual.get("bath_bubbles", []):
+				fill(bubble.x - bubble.r, bubble.y - bubble.r, bubble.r * 2, bubble.r * 2, color("#eef8ff"))
+				fill(bubble.x - bubble.r, bubble.y - bubble.r, 1, 1, Color.WHITE)
 		elif p.get("asleep", false): sleeping_pet(p, at)
 		else: pet(p, at)
+	for heart: Dictionary in visual.get("hearts", []):
+		if heart.t > 0: continue
+		var ink := color("#ef5b8d"); ink.a = clampf(heart.life, 0, 1)
+		fill(heart.x, heart.y, 2, 2, ink); fill(heart.x + 4, heart.y, 2, 2, ink)
+		fill(heart.x, heart.y + 2, 6, 2, ink); fill(heart.x + 2, heart.y + 4, 2, 2, ink)
 	if state.get("decor", false) and state.get("memoUnlocked", false):
 		fill(10, 12, 2, 6, color("#ffd97a"))
 		fill(8, 14, 6, 2, color("#ffd97a"))

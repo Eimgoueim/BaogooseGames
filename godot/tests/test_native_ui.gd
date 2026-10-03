@@ -29,6 +29,8 @@ func _run() -> void:
 		return
 	app.set("preview_mode", true)
 	root.add_child(app)
+	# 此测试固定画面测试UI输入；定时养成与排泄另有独立行为对照。
+	app.set_process(false)
 	await process_frame
 	_check(app.get("state") is Dictionary, "启动后 state 应为字典")
 	_check(app.get("hud") != null and app.get("pages") != null and app.get("modals") != null, "主场景应创建 HUD、页面和弹窗成员")
