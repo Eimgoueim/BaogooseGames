@@ -1,0 +1,16 @@
+# ---- 构建中间产物 ----
+packaging/out/
+packaging/_zipstage/
+packaging/PetGame.ico
+packaging/src/PetGame.html
+
+# ---- 临时/调试文件 ----
+_*.js
+_*.ps1
+*.tmp
+*.log
+
+# ---- 系统 ----
+Thumbs.db
+Desktop.ini
+.DS_Store
