@@ -1660,19 +1660,22 @@
   }
   // 打开 / 关闭屏幕页面（商店、背包、佩饰、房间、抽卡、积分）
   const OVERLAY_ALL = ['adoptOverlay', 'gachaOverlay', 'hubOverlay', 'miniOverlay', 'saveOverlay', 'themeOverlay', 'dlgOverlay'];
-  // 家具旁的「确定 / 取消」：确定=记为基准；取消=还原到开始摆放前
-  function furnSnapshot() { return JSON.parse(JSON.stringify(state.placed || {})); }
   function furnConfirm(keep) {
-    if (keep) {
-      PX.furnBase = furnSnapshot();
+    if (keep) {                                          // 绿勾：直接保存"这一件"的位置
       save();
-      toast('✅ 摆好了（已保存）');
-    } else {
-      if (PX.furnBase) state.placed = JSON.parse(JSON.stringify(PX.furnBase));
+      state.sel = '';
       PX.drag = null;
       PX.furnBtns = null;
-      save(); render();
-      toast('↩️ 已取消，位置还原到开始摆放前');
+      render();
+      toast('✅ 这件家具的位置已保存');
+    } else {                                             // 红叉：收回道具栏（从房间移除，回到道具栏）
+      const k = state.sel;
+      if (k && pxDel(k)) {
+        PX.drag = null;
+        PX.furnBtns = null;
+        render(); save();
+        toast('↩️ 已收回道具栏，可以重新摆放');
+      }
     }
     if (PX.ctx) pxDraw();
   }
@@ -3046,9 +3049,11 @@
     if (uiTab === 'room')   {
       const owned = Object.keys(PLACE).filter(k => {
         const it = PLACE[k];
-        return it.kind === 'furn' ? !!(state.furnOwn && state.furnOwn[k]) : !!(state.decos && state.decos[it.key || k]);
+        const has = it.kind === 'furn' ? !!(state.furnOwn && state.furnOwn[k]) : !!(state.decos && state.decos[it.key || k]);
+        return has && !(state.placed && state.placed[k]);        // 已经摆到房间里的不再出现在道具栏
       });
-      return { kind:'room', label:'🛋️ 家具', act:'sel', keys: owned };
+      return { kind:'room', label:'🛋️ 家具', act:'sel', keys: owned,
+               emptyHint: '🛋️ 家具都摆好啦（点房间里选中的家具，绿勾保存 / 红叉收回）' };
     }
     return { kind:'bag', label:'🎒 道具', act:'use', keys: useKeys() };
   }
@@ -3127,7 +3132,8 @@
     const slice = keys.slice(usePage * size, usePage * size + size);
     let h = barExtras(set.kind);
     if (!keys.length) {
-      h += '<span class="ub-empty">' + (set.kind === 'bag' ? '🎒 背包里没有可用的道具'
+      h += '<span class="ub-empty">' + (set.emptyHint ? set.emptyHint
+        : set.kind === 'bag' ? '🎒 背包里没有可用的道具'
         : set.kind === 'wear' ? '🎀 还没有佩饰～去商店买或抽卡'
         : set.kind === 'room' ? '🛋️ 还没有家具～去商店「家具」买'
         : set.kind === 'points' ? '🏆 暂无可兑换的' : '这里还没有东西') + '</span>';
@@ -4809,13 +4815,11 @@ function rlWire(cv) {
         case 'pet':   return petPet();
         case 'edit':
           state.edit = !state.edit;
-          if (state.edit) { PX.furnBase = JSON.parse(JSON.stringify(state.placed || {})); }   // 记基准，红叉可还原
           if (!state.edit) { state.sel = ''; PX.drag = null; PX.furnBtns = null; }
           toast(state.edit ? '🛋️ 布置模式：拖动家具摆放位置，滚轮或滑块调大小' : '✅ 布置完成，已保存');
           render(); save(); return;
         case 'sel':
           if (!pxOwned(arg)) { toast('还没有这件家具/装饰品，先去商店买或者抽卡'); return; }
-          if (!state.edit) PX.furnBase = JSON.parse(JSON.stringify(state.placed || {}));       // 直接点家具 = 进入布置，先记基准
           state.edit = true;
           if (!state.placed) state.placed = {};
           if (state.placed[arg]) { state.sel = arg; }
