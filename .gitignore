@@ -14,3 +14,8 @@ _*.ps1
 Thumbs.db
 Desktop.ini
 .DS_Store
+
+# ---- Godot 缓存与本地验证产物 ----
+godot/.godot/
+godot/.runtime/
+godot/build/

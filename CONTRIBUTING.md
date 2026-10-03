@@ -58,6 +58,21 @@ cd BaogooseGames
 7. **主题**：新颜色请用 CSS 变量（`--warm` / `--card` / `--bg2` 等），让 6 套主题都能正常显示
 8. **注释写中文**，和现有代码保持一致
 
+### Godot 迁移约定
+
+Godot 工程位于 `godot/`，迁移目标是只替换底层架构，保留原版 UI、美术、文案、数值和玩法。新增 Godot 代码时遵循 [迁移说明](docs/GODOT_MIGRATION.md) 和 [Godot 工程说明](godot/README.md)：先以原 HTML 为准，按功能逐项核对视觉与行为；不得借迁移悄悄修复旧版 bug，修 bug 应单独提出并记录。Godot 页面成为主要入口前，必须完成全功能迁移与对照验证。
+
+原版 HTML 的约定仍适用于 HTML 改动。若 Godot 迁移要求与本节前述单 HTML 约定冲突，**Godot 改动以 Godot 迁移文档为准**；这不改变 HTML 原版的发布与贡献流程。
+
+本机已验证环境为 Godot 4.7.2（`D:/godot`）；其他环境建议使用 Godot 4.7.2。阶段一可用以下命令校验工程与存档 codec：
+
+```powershell
+godot --headless --editor --path godot --quit
+godot --headless --path godot --script res://tests/test_saves.gd
+```
+
+`F5`/`F6` 当前启动的是原版 Canvas 静态视觉预览，不代表完整 UI 一致性已经验证。
+
 ---
 
 ## 四、动手改之前先自测

@@ -1,5 +1,7 @@
 # 🐾 Baogoose Games · 包鹅养成
 
+> **Godot 迁移状态：阶段一基础工程与原版视觉基准预览。** 这是迁移验证入口，不是完整游戏；日常游玩仍请使用下方原版 HTML。详见 [Godot 迁移说明](docs/GODOT_MIGRATION.md) 与 [Godot 工程说明](godot/README.md)。
+
 一个 **单文件 HTML** 的中国风 / Blue Archive 风格宠物养成小游戏：像素房间 + 抽卡 + 多宠同养 + 肉鸽地牢。
 不需要服务器、不需要安装任何依赖，双击 `宠物养成游戏.html` 就能玩，**完全离线**。
 
