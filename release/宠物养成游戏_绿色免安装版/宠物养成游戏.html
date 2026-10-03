@@ -65,9 +65,11 @@
   }
 
   /* ---------- 宠物槽 ---------- */
-  .slots-float .pet-slots{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:4px;margin:0;justify-content:end}
+  .slots-float .pet-slots{display:grid;grid-template-columns:repeat(6,minmax(0,1fr));gap:2px 3px;margin:0;justify-content:end}
   @media (max-width:560px){ .pet-slots{grid-template-columns:repeat(3,1fr)} }
-  .slots-float .slots-head{font-size:9.5px;color:#f2ecff;font-weight:800;text-align:right;margin:0 1px 3px;letter-spacing:.2px}
+  .slots-float .slots-head{grid-column:1/-1;font-size:8px;color:#f2ecff;font-weight:800;text-align:right;margin:0 1px 2px;
+    letter-spacing:.1px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;opacity:.95;
+    text-shadow:0 1px 3px rgba(20,12,44,.7)}
   .slot{
     position:relative;display:flex;flex-direction:column;align-items:center;gap:3px;padding:6px 5px;
     border-radius:16px;background:var(--soft);border:1.5px solid var(--line2);cursor:pointer;
@@ -178,8 +180,11 @@
 
   /* ---------- toast ---------- */
   .toasts{position:fixed;left:50%;bottom:24px;transform:translateX(-50%);z-index:120;display:flex;flex-direction:column;gap:8px;align-items:center;pointer-events:none}
-  .toast{background:linear-gradient(135deg,rgba(44,43,61,.96),rgba(70,58,110,.96));color:#fff;font-size:13px;font-weight:600;
-    padding:10px 18px;border-radius:999px;box-shadow:0 14px 30px rgba(0,0,0,.25);animation:toastIn .3s cubic-bezier(.2,.9,.3,1);max-width:88vw}
+  .toast{background:linear-gradient(135deg,rgba(44,43,61,.30),rgba(70,58,110,.26));color:#fff;font-size:13px;font-weight:600;
+    padding:9px 17px;border-radius:999px;border:1px solid rgba(255,255,255,.26);
+    -webkit-backdrop-filter:blur(9px);backdrop-filter:blur(9px);
+    box-shadow:0 10px 26px rgba(0,0,0,.16);text-shadow:0 1px 4px rgba(20,12,44,.85), 0 0 10px rgba(20,12,44,.5);
+    animation:toastIn .3s cubic-bezier(.2,.9,.3,1);max-width:88vw}
   .toast.out{opacity:0;transform:translateY(8px);transition:.4s}
   @keyframes toastIn{from{opacity:0;transform:translateY(16px) scale(.96)}to{opacity:1;transform:none}}
 
@@ -317,12 +322,18 @@
   body[data-theme="night"] .mini-card{box-shadow:0 30px 70px rgba(0,0,0,.6), var(--gloss)}
 
   /* ---------- 页内对话框 ---------- */
-  .dlg-card{width:min(430px,94vw)}
+  .dlg-card{width:min(430px,94vw);
+    background:rgba(255,255,255,.30);border:1px solid rgba(255,255,255,.5);
+    -webkit-backdrop-filter:blur(12px);backdrop-filter:blur(12px);
+    box-shadow:0 24px 60px rgba(20,10,50,.30)}
+  body[data-theme="night"] .dlg-card{background:rgba(44,34,66,.32);border-color:rgba(255,255,255,.22)}
   .dlg-body{padding:4px 4px 12px;font-size:13.5px;line-height:1.8}
   .dlg-input{width:100%;margin-top:10px;padding:12px;border-radius:14px;border:1.5px solid var(--line2);
     font-family:inherit;font-size:14px;outline:none;color:var(--ink);background:var(--soft)}
   .dlg-input:focus{border-color:var(--purple);box-shadow:0 0 0 3px rgba(139,123,255,.16)}
   .dlg-actions{display:flex;justify-content:flex-end;gap:8px}
+  .dlg-card .btn{background:rgba(255,255,255,.34)}
+  .dlg-card .btn.primary{background:linear-gradient(135deg,rgba(139,123,255,.72),rgba(255,143,177,.72))}
 
     /* 已移除：宠物3D本体段（改为像素 LCD 渲染） */
 /* ================= 宠物右侧的喂食竖栏 ================= */
@@ -504,10 +515,11 @@
     min-height:0;padding:0;gap:0;border-radius:6px;border:0;background:none;box-shadow:none;
     filter:drop-shadow(0 1px 2px rgba(20,12,44,.5));
   }
-  .slots-float .slot .sart canvas,.slots-float .slot .sart img,.slots-float .slot .sart svg{width:20px;height:auto}
-  .slots-float .slot .snm{font-size:7.5px;color:#fff;font-weight:800;line-height:1.05;max-width:100%;
+  .slots-float .slot .sart canvas,.slots-float .slot .sart img,.slots-float .slot .sart svg{width:15px;height:auto}
+  .slots-float .slot .sart{height:auto}
+  .slots-float .slot .snm{font-size:6.5px;color:#fff;font-weight:800;line-height:1.05;max-width:100%;
     overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-  .slots-float .slot .slv{font-size:7px;color:#ffe9a8;line-height:1.05}
+  .slots-float .slot .slv{font-size:6px;color:#ffe9a8;line-height:1.05}
   .slots-float .slot .sbar{display:none}
   .slots-float .slot .curdot,.slots-float .slot .lim{display:none}
   .slots-float .slot.cur{outline:1.5px solid #ffe9a8;outline-offset:-1px;border-radius:6px}
@@ -556,10 +568,10 @@
     box-shadow:0 12px 26px rgba(60,40,110,.14), inset 0 1px 0 rgba(255,255,255,.65);
     padding:11px 13px;
   }
-  .slots-float{right:2px;top:var(--top-ui, 96px);max-width:min(46vw,240px);padding:0;background:none;border:0;box-shadow:none;
+  .slots-float{right:2px;top:var(--top-ui, 96px);max-width:min(32vw,168px);padding:0;background:none;border:0;box-shadow:none;
     -webkit-backdrop-filter:none;backdrop-filter:none;
     text-shadow:0 1px 3px rgba(20,12,44,.7), 0 0 8px rgba(20,12,44,.45)}
-  .slots-float .slots-head{display:none}
+  .slots-float .slots-head{display:block}
   /* 喂食/使用栏已收进背包页面，不再浮动在房间上 */
 
   /* 白色功能页面已删除：内容全部走最底部的通用道具栏 */
@@ -1149,6 +1161,7 @@
       inv: { basic: 3 }, hasToy: false, seenItems: {}, wear: {}, placed: {}, furnOwn: {}, edit: false, sel: '',
       theme: 'sakura', accent: '', camYaw: 0, camZoom: 1,
       best: {},
+      lv: 1, exp: 0,                                   // 玩家等级 / 共享经验（所有宠物等级统一）
       decos: {}, collection: [], picked: false, bgm: true, poops: [], grave: [], shards: {}, banner: 'whale', pity: 0,
       title: '', decor: false, memoUnlocked: false, gearGiven: false,
       pulls: 0, lastTick: Date.now(), workReady: 0
@@ -1168,8 +1181,20 @@
   const P    = () => ensurePet();
   const spOf = p => SPECIES[p.species] || SPECIES.dragon;
   // 宠物栏位：首次只有 1 个，之后每升 1 级解锁 1 个（上限 MAX_PETS）
-  const bestLevel = () => state.pets.reduce((m, q) => Math.max(m, q.level || 1), 1);
-  const slotsUnlocked = () => Math.max(1, Math.min(MAX_PETS, bestLevel()));
+  // 等级统一成「玩家等级」：所有宠物同一个等级、同一个经验池
+  const playerLevel = () => {
+    let L = Number(state.lv) | 0;
+    if (L < 1) L = (state.pets || []).reduce((m, q) => Math.max(m, q.level | 0), 1) || 1;
+    return Math.max(1, L);
+  };
+  function syncLevels() {                              // 把玩家等级/经验刷到所有宠物身上
+    const L = playerLevel();
+    state.lv = L;
+    state.exp = Math.max(0, Number(state.exp) | 0);
+    (state.pets || []).forEach(q => { q.level = L; q.exp = state.exp; });
+  }
+  const bestLevel = () => playerLevel();
+  const slotsUnlocked = () => Math.max(1, Math.min(MAX_PETS, playerLevel()));
   const isSick = p => p.health <= 0;
   const isWeak = p => p.health < 25 && p.health > 0;
   function stageIdx(p) { const s = spOf(p).stages; let i = 0; for (let k = 0; k < s.length; k++) if (p.level >= s[k].min) i = k; return i; }
@@ -2691,6 +2716,9 @@
   function save() {
     try { state.lastTick = Date.now(); localStorage.setItem(SAVE_KEY, JSON.stringify(state)); } catch (e) {}
   }
+  function bestOfPets(list) {
+    return (list || []).reduce((m, q) => Math.max(m, (q && q.level) | 0), 1) || 1;
+  }
   // 把任意（可能被手改过的）存档对象规范化成内部状态；读档与「导入存档」共用
   function normalizeSave(d) {
     const st = defaultState();
@@ -2761,6 +2789,9 @@
         st.placed[pk] = { x: df.x, y: df.y, s: df.s || 1 };
       }
     });
+    st.lv = Math.max(1, Number(d && d.lv) || bestOfPets(st.pets));
+    st.exp = Math.max(0, Number(d && d.exp) || 0);
+    (st.pets || []).forEach(q => { q.level = st.lv; q.exp = st.exp; });      // 等级统一
     st.edit = false;
     st.sel = '';
     st.wear = {};
@@ -2917,19 +2948,23 @@
     const p = P();
     const gain = Math.max(1, Math.round(n * (spOf(p).perks.expMul || 1)));   // 白龙娘学得快
     const oldStage = stageOf(p).name;
-    p.exp += gain;
+    syncLevels();                                            // 老档兜底：先把等级统一
+    const oldLv = playerLevel();
+    state.exp += gain;                                       // 经验进「玩家」共享池
     let leveled = false;
-    while (p.exp >= expNeed(p.level)) {
-      p.exp -= expNeed(p.level);
-      p.level++;
+    while (state.exp >= expNeed(playerLevel())) {
+      state.exp -= expNeed(playerLevel());
+      state.lv = playerLevel() + 1;
       state.coins += 50;                                     // 每升一级给 50 信用点
       p.mood = clamp(p.mood + 10);
       leveled = true;
     }
+    syncLevels();                                            // 所有宠物等级一起涨
     if (leveled) {
       const st = stageOf(p);
-      if (st.name !== oldStage) toast('✨ 成长啦！' + p.name + ' 现在是「' + st.name + '」');
-      else toast('🎉 升级！' + p.name + ' 到 Lv.' + p.level + '（信用点 +50 · 栏位 ' + slotsUnlocked() + '/' + MAX_PETS + '）');
+      if (st.name !== oldStage) toast('✨ 成长啦！玩家等级 Lv.' + playerLevel() + ' → ' + p.name + ' 也变成「' + st.name + '」');
+      else toast('🎉 玩家等级 Lv.' + oldLv + ' → Lv.' + playerLevel() + '！所有宠物一起升级（信用点 +50 · 栏位 ' +
+        slotsUnlocked() + '/' + MAX_PETS + '）');
     }
   }
 
@@ -3014,7 +3049,7 @@
   function revivePet(i) {                                 // 复活墓碑里的伙伴
     const g = (state.grave || [])[i];
     if (!g) return;
-    if ((g.level | 0) < REVIVE_MIN_LV) { toast('🪦 ' + g.name + ' 只到 Lv.' + g.level + '，需要到过 Lv.' + REVIVE_MIN_LV + ' 才能复活'); return; }
+    if (playerLevel() < REVIVE_MIN_LV) { toast('🪦 玩家等级 Lv.' + playerLevel() + '，需要到 Lv.' + REVIVE_MIN_LV + ' 才能复活（提升等级后来看看）'); return; }
     const sp2 = SPECIES[g.species] || SPECIES.dragon;
     const needShard = sp2.limited ? REVIVE_SHARDS : 0;
     if (state.coins < REVIVE_COST) { toast('💰 复活需要 ' + REVIVE_COST + ' 信用点（不够）'); return; }
@@ -3022,7 +3057,7 @@
     state.coins -= REVIVE_COST;
     if (needShard) state.shards[g.species] = shardOf(g.species) - needShard;
     const np = makePet(g.species);
-    np.name = g.name; np.level = Math.max(1, g.level | 0);
+    np.name = g.name; np.level = playerLevel();
     const old = state.pets[state.active];
     np.hunger = 55; np.mood = 50; np.clean = 55; np.energy = 60; np.health = 55;
     np.affRank = Math.max(1, g.affRank | 0);
@@ -3494,6 +3529,11 @@
     render(); save();
   }
 
+  function adoptWithLevel(np) {                              // 新宠物直接跟玩家等级
+    np.level = playerLevel();
+    np.exp = Math.max(0, Number(state.exp) | 0);
+    return np;
+  }
   function adopt(key) {
     const sp = SPECIES[key];
     if (!sp) return;
@@ -3517,7 +3557,7 @@
   }
 
   function doAdopt(key, slot) {
-    const np = makePet(key);
+    const np = adoptWithLevel(makePet(key));            // 新宠物直接跟玩家等级（等级统一）
     // 同名自动加序号，避免出现两只「咪咪」
     const base = np.name;
     let n = 2;
@@ -3525,7 +3565,7 @@
     if (slot >= 0 && slot < state.pets.length) state.pets[slot] = np;
     else state.pets.push(np);
     state.active = slot >= 0 ? slot : state.pets.length - 1;
-    toast('🐾 ' + np.name + '（' + SPECIES[key].name + '）加入了！');
+    toast('🐾 ' + np.name + '（' + SPECIES[key].name + '）加入了！等级跟随玩家 Lv.' + playerLevel() + '（所有宠物等级统一）');
     closeAdopt(); render(); save();
   }
 
@@ -4612,10 +4652,9 @@ function rlWire(cv) {
 
     // 宠物槽
     const unlocked = slotsUnlocked();
-    const slots = ['<div class="slots-head">🐾 宠物 ' + state.pets.length + '/' + unlocked +
-                   ' · 点头像切换出战' +
-                   (unlocked < MAX_PETS ? ' · 升到 Lv.' + (unlocked + 1) + ' 解锁 1 个栏位' : '') +
-                   (state.pets.length > 1 ? ' · 橙框＝在家挨饿' : '') + '</div>'];
+    const slots = ['<div class="slots-head" title="玩家等级 Lv.' + playerLevel() + ' · 宠物 ' + state.pets.length + '/' + unlocked +
+                   ' 只 · 点头像切换出战 · 红框＝危险 橙框＝饿着">👤Lv.' + playerLevel() + ' · 🐾' + state.pets.length + '/' + unlocked +
+                   (unlocked < MAX_PETS ? ' · 升Lv.' + (unlocked + 1) + '解锁' : '') + '</div>'];
     for (let i = 0; i < MAX_PETS; i++) {
       const q = state.pets[i];
       if (!q) {
@@ -4919,15 +4958,15 @@ function rlWire(cv) {
         if (!gs.length) { gb.className = 'grave-box'; gb.innerHTML = ''; }
         else {
           gb.className = 'grave-box on';
-          gb.innerHTML = '<div class="gb-title">🪦 已离世的伙伴（到过 Lv.' + REVIVE_MIN_LV + ' 可复活：💰' + REVIVE_COST +
-            '，限定宠物还需 🧩' + REVIVE_SHARDS + ' 碎片）</div>' + gs.map((g, i) => {
+          gb.innerHTML = '<div class="gb-title">🪦 已离世的伙伴（玩家等级 Lv.' + REVIVE_MIN_LV + ' 可复活：💰' + REVIVE_COST +
+            '，限定宠物还需 🧩' + REVIVE_SHARDS + ' 碎片）· 当前玩家等级 Lv.' + playerLevel() + '</div>' + gs.map((g, i) => {
               const sp2 = SPECIES[g.species] || SPECIES.dragon;
               const sh = sp2.limited ? shardOf(g.species) : 0;
-              const canLv = (g.level | 0) >= REVIVE_MIN_LV;
+              const canLv = playerLevel() >= REVIVE_MIN_LV;
               const canPay = state.coins >= REVIVE_COST && (!sp2.limited || sh >= REVIVE_SHARDS);
               const why = !canLv ? '只到 Lv.' + g.level : (!canPay ? (state.coins < REVIVE_COST ? '信用点不够' : '碎片不够') : '');
               return '<div class="gb-row"><span>💀</span><span class="gb-name">' + g.name + '</span>' +
-                '<span class="gb-sub">' + sp2.name + ' · Lv.' + g.level + (sp2.limited ? ' · 🧩' + sh : '') + '</span>' +
+                '<span class="gb-sub">' + sp2.name + ' · 离世时 Lv.' + g.level + (sp2.limited ? ' · 🧩' + sh : '') + '</span>' +
                 '<button class="gb-btn" data-action="revive:' + i + '"' + (canLv && canPay ? '' : ' disabled') +
                 ' title="' + (why || '复活它') + '">' + (canLv && canPay ? '✨ 复活' : (canLv ? '条件不足' : 'Lv.' + REVIVE_MIN_LV + ' 才能复活')) + '</button></div>';
             }).join('');
