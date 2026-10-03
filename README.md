@@ -101,3 +101,19 @@ baogoose_game/
 - 目标浏览器：Edge / Chrome / Firefox 等现代浏览器（用到 Canvas 2D、Web Audio、localStorage）
 - 存档在浏览器 `localStorage`（键名 `dsh-pet-game-v2`），换浏览器/清缓存会丢，建议在游戏内「💾 存档」页导出备份
 - 游戏内的宠物名称致敬 Blue Archive 角色，但**美术全部为原创像素画**，与官方无关
+
+---
+
+## 🤝 一起开发
+
+欢迎一起来改这个游戏！最快的上手方式：
+
+```bash
+git clone https://github.com/Eimgoueim/BaogooseGames.git
+cd BaogooseGames
+# 直接用浏览器打开 宠物养成游戏.html 就能玩，改完刷新页面即可
+```
+
+- 详细的贡献流程、代码约定、自测清单见 **[CONTRIBUTING.md](CONTRIBUTING.md)**
+- 有想法不想写代码也可以开 [Issue](https://github.com/Eimgoueim/BaogooseGames/issues)
+- 想加入协作（直接推分支 / review PR）请找仓库维护者 @Eimgoueim 把你加为 **Collaborator**
