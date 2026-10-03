@@ -1063,6 +1063,9 @@
   const el = id => document.getElementById(id);
   const clamp = (v, lo = 0, hi = 100) => Math.max(lo, Math.min(hi, v));
   const rand = (a, b) => a + Math.floor(Math.random() * (b - a + 1));
+  const POOP_MS = 5 * 60 * 1000;      // 每 5 分钟拉一坨
+  const POOP_WARN_MS = 9 * 1000;      // 拉之前的预警：抖动 + 大叫
+  const POOP_MAX = 6;                 // 地上最多同时几坨
   const expNeed = lv => 40 + lv * 35;
   const affNeed = rk => 60 + rk * 50;
   const LIMIT_KEYS = Object.keys(SPECIES).filter(k => SPECIES[k].limited);
@@ -1078,7 +1081,8 @@
       level: 1, exp: 0,
       hunger: sp.base.hunger, mood: sp.base.mood, clean: sp.base.clean,
       energy: sp.base.energy, health: sp.base.health,
-      affRank: 1, affinity: 0, asleep: false, ageTicks: 0, born: Date.now(), worn: {}
+      affRank: 1, affinity: 0, asleep: false, ageTicks: 0, born: Date.now(), worn: {},
+      poopNext: Date.now() + POOP_MS, poopWarn: false
     };
   }
 
@@ -1090,7 +1094,7 @@
       inv: { basic: 3 }, hasToy: false, seenItems: {}, wear: {}, placed: {}, furnOwn: {}, edit: false, sel: '',
       theme: 'sakura', accent: '', camYaw: 0, camZoom: 1,
       best: {},
-      decos: {}, collection: [], picked: false, bgm: true, banner: 'whale', pity: 0,
+      decos: {}, collection: [], picked: false, bgm: true, poops: [], banner: 'whale', pity: 0,
       title: '', decor: false, memoUnlocked: false, gearGiven: false,
       pulls: 0, lastTick: Date.now(), workReady: 0
     };
@@ -1607,7 +1611,8 @@
     const cd = Math.max(0, (state.workReady || 0) - Date.now());
     if (key === 'feed')  return p.asleep || totalItems() === 0;
     if (key === 'play')  return p.asleep || p.energy < 10;
-    if (key === 'bath')  return p.asleep || p.clean >= 98;
+    if (key === 'bath')  return p.asleep || (p.clean >= 98 && !(state.poops || []).length &&
+      !(p.poopNext && Date.now() > p.poopNext - POOP_WARN_MS));   // 有屎/想拉时也能点
     if (key === 'work')  return p.asleep || cd > 0 || p.energy < 20;
     if (key === 'games') return p.asleep;
     return false;                                   // sleep / pet / room / shop / gacha 随时可用
@@ -1799,6 +1804,15 @@
     ctx.restore();
     return headTop;
   }
+  function pxPoop(cx, by, s) {                          // 一小坨像素屎
+    s = s || 1;
+    const F = (x, y, w, h, c) => pxFill(cx + x * s, by - y * s, w * s, h * s, c);
+    F(-3, 0, 6, 2, '#5d4023');
+    F(-2, 2, 4, 2, '#75512c');
+    F(-1, 4, 2, 2, '#8a6135');
+    F(0, 6, 1, 1, '#9c7040');
+    F(-2, 1, 1, 1, '#46301a');
+  }
   function pxDrawPet(p) {
     const key = spOf(p).key;
     const st = stageIdx(p);
@@ -1808,6 +1822,7 @@
     if (PX.hop > 0) by -= Math.round(PX.hop * 7);
     if (!p.asleep && PX.bob) by -= 1;
     const dragged = !!(PX.petDrag && PX.petDrag.p === p);
+    if (p.poopWarn && !p.asleep) by -= Math.round(PX.t * 26) % 2 === 0 ? 0 : 1;     // 想拉屎：抖
     const annoyed = (dragged || PX.annoy > 0) && !p.asleep;
     const o = { awake: !p.asleep, happy: PX.face === 'happy' && !annoyed, sick: PX.face === 'sick', annoy: annoyed, dir: 1 };
     const ctx = PX.ctx;
@@ -1905,6 +1920,10 @@
         pxFill(x0, y0, w, 1, '#8b7bff'); pxFill(x0, y0 + h - 1, w, 1, '#8b7bff');
         pxFill(x0, y0, 1, h, '#8b7bff'); pxFill(x0 + w - 1, y0, 1, h, '#8b7bff');
       }
+    });
+    (state.poops || []).forEach(q => {                  // 地上的屎
+      const at = petAt(q);
+      pxPoop(at.cx, at.by, 1);
     });
     pxDrawPet(p);
     if (state.decor && state.memoUnlocked) { pxFill(10, 12, 2, 6, '#ffd97a'); pxFill(8, 14, 6, 2, '#ffd97a'); }
@@ -2141,6 +2160,16 @@
   function pxSim(dt) {
     const p = P();
     if (!p) return;
+    // ⑥ 想拉屎：先抖动 + 大叫预警，到点就拉
+    if (!p.asleep && p.poopNext) {
+      const left = p.poopNext - Date.now();
+      p.poopWarn = left <= POOP_WARN_MS;
+      if (p.poopWarn) {
+        PX.poopCryT = (PX.poopCryT || 0) - dt;
+        if (PX.poopCryT <= 0) { PX.poopCryT = 1.5; petCry(p); }    // 大叫
+      } else PX.poopCryT = 0;
+      if (left <= 0) { poopNow(p); return; }
+    } else { p.poopWarn = false; PX.poopCryT = 0; }
     // ① 掉落：拖到高处松手后会往下掉，落到地面线就停（不会掉到最底部）
     if (PX.fall) {
       PX.fall.vy += 2.6 * dt;
@@ -2323,7 +2352,9 @@
         if (ev.preventDefault) ev.preventDefault();
         return;
       }
-      const p = P();                                 // 3) 拖动宠物 / 轻点抚摸
+      const p = P();                                 // 2.5) 点到屎 → 清理
+      const pq = pxHitPoop(pt);
+      if (pq >= 0) { cleanPoop(pq); PX.tap = false; if (ev.preventDefault) ev.preventDefault(); return; }
       if (pxHitPet(pt, p)) {
         PX.fall = null;
         const pp = petAt(p);
@@ -2454,6 +2485,13 @@
       });
     }
     st.bgm = !(d && d.bgm === false);                   // 背景音乐开关（老档默认开）
+    st.poops = Array.isArray(d && d.poops)
+      ? d.poops.slice(-POOP_MAX).map(q => ({
+          lx: clamp(Number(q && q.lx) || 0.5, PET_X0, PET_X1),
+          ly: clamp(Number(q && q.ly) || 0.7, PET_Y0, PET_Y1),
+          t: Number(q && q.t) || Date.now()
+        }))
+      : [];                                             // 地上的屎（老档没有任何）
     st.welcome = !!(d && d.welcome);
     st.picked = (d && d.picked === undefined) ? true : !!(d && d.picked);   // 老档直接算已选定
     st.furnOwn = {};
@@ -2690,13 +2728,56 @@
     return woke;
   }
 
+  function poopFix(p) {                                 // 每只宠物的拉屎时间（老档/离线兜底）
+    const now = Date.now();
+    if (!p.poopNext || !isFinite(p.poopNext)) p.poopNext = now + POOP_MS;
+    else if (now - p.poopNext > POOP_MS) p.poopNext = now + POOP_MS;   // 离线太久就不补一堆了
+    return p;                                    // 注意：不要在这里清 poopWarn，它由 pxSim 管
+  }
+  function poopNow(p) {                                 // 拉一坨
+    const at = petAt(p);
+    if (!Array.isArray(state.poops)) state.poops = [];
+    state.poops.push({ lx: clamp(at.cx / PXW, PET_X0, PET_X1), ly: clamp(at.by / PXH, PET_Y0, PET_Y1), t: Date.now() });
+    if (state.poops.length > POOP_MAX) state.poops.shift();
+    p.poopNext = Date.now() + POOP_MS;
+    p.poopWarn = false;
+    p.clean = clamp(p.clean - 18);
+    p.mood = clamp(p.mood - 6);
+    fx('💩');
+    toast('💩 ' + p.name + ' 拉了一坨…点它就能清理（或用 🛁 清洁键）');
+    render(); save();
+  }
+  function pxHitPoop(pt) {                              // 点到屎了吗
+    const list = state.poops || [];
+    for (let i = list.length - 1; i >= 0; i--) {
+      const at = petAt(list[i]);
+      if (Math.abs(pt.x - at.cx) <= 7 && pt.y <= at.by + 2 && pt.y >= at.by - 9) return i;
+    }
+    return -1;
+  }
+  function cleanPoop(i) {                               // 清理一坨
+    const list = state.poops || [];
+    if (i < 0 || i >= list.length) return;
+    list.splice(i, 1);
+    const p = P();
+    p.clean = clamp(p.clean + 6);
+    p.mood = clamp(p.mood + 4);
+    gainPoints(2, 0, 1);
+    fx('🧹');
+    toast('🧹 清理干净啦（清洁 +6 · 心情 +4 · 积分 +2）');
+    render(); save();
+  }
   function tick() {
     try {                                                    // 一次出错不该让整个游戏停摆
       const p = P();
       if (stepPet(p, 'active')) toast('☀️ ' + p.name + ' 睡饱啦，精神满满！');
       addExp(2);
       addAffinity(p.asleep ? 0.4 : 0.3);
-      state.pets.forEach((q, i) => { if (i !== state.active) stepPet(q, 'bench'); });
+      state.pets.forEach((q, i) => { if (i !== state.active) stepPet(q, 'bench'); poopFix(q); });
+      if ((state.poops || []).length) {                   // 地上有屎：清洁度与心情持续下滑
+        p.clean = clamp(p.clean - 0.6);
+        p.mood = clamp(p.mood - 0.3);
+      }
       render();
       save();
     } catch (e) { pxSoftError(e); PX.tickErr = String(e && e.message ? e.message : e); }
@@ -2977,13 +3058,28 @@
   function bath() {
     const p = P(), pk = spOf(p).perks;
     if (p.asleep) { toast('😴 睡着了不能洗澡哦'); return; }
-    if (p.clean >= 98) { toast('🫧 已经很干净啦'); return; }
+    const list = state.poops || (state.poops = []);
+    const due = !!(p.poopNext && Date.now() > p.poopNext - POOP_WARN_MS);
+    if (!list.length && !due && p.clean >= 98) { toast('🫧 已经很干净啦'); return; }
+    let msg = '';
+    if (list.length) {                                  // ① 先把地上的清理掉
+      msg = '清理了 ' + list.length + ' 坨，';
+      list.length = 0;
+      p.clean = clamp(p.clean + 6);
+      p.mood = clamp(p.mood + 4);
+    }
+    if (due) {                                          // ② 帮它拉出来（不留在房间里）
+      p.poopNext = Date.now() + POOP_MS;
+      p.poopWarn = false;
+      msg += '又帮它顺利拉出来了，';
+      p.mood = clamp(p.mood + 2);
+    }
     p.clean = clamp(p.clean + 48 * (pk.bathGain || 1));
     p.mood  = clamp(p.mood - 4);
     addExp(8);
     addAffinity(2);
     fx('🫧');
-    toast('🛁 ' + p.name + ' 洗得香喷喷，清洁度大涨！');
+    toast('🛁 ' + msg + p.name + ' 洗得香喷喷，清洁度大涨！');
     render(); save();
   }
 
@@ -4227,6 +4323,8 @@ function rlWire(cv) {
     if (p.asleep) tags.push(['😴', 'good', '睡觉中']);
     if (isSick(p)) tags.push(['🤒', 'bad', '生病了，快用药水']);
     else if (isWeak(p)) tags.push(['😷', 'warn', '身体虚弱']);
+    if ((state.poops || []).length) tags.push(['💩', 'bad', '地上有 ' + state.poops.length + ' 坨，点它清理']);
+    if (p.poopWarn && !p.asleep) tags.push(['💩', 'warn', '想拉屎：点 🛁 清洁键帮它']);
     if (p.hunger < 25) tags.push(['🍖', 'bad', '饿坏了']);
     else if (p.hunger < 50) tags.push(['🍖', 'warn', '有点饿']);
     if (p.mood < 30) tags.push(['😢', 'warn', '不开心']);
