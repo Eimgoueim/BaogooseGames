@@ -78,6 +78,11 @@
   .slot.cur{background:var(--btn);border-color:transparent;box-shadow:0 0 0 2px var(--purple),0 10px 22px rgba(96,84,180,.22)}
   .slot.warn{border-color:#ffcf8a;background:rgba(255,179,64,.14);box-shadow:0 0 0 2px rgba(255,179,64,.18)}
   .slot.empty{min-height:64px;padding:4px;border-style:dashed;color:var(--muted);font-size:11.5px;font-weight:700;gap:5px}
+  /* 背景音乐开关（左下角小圆钮） */
+  .bgm-btn{position:fixed;left:10px;bottom:104px;z-index:6;width:30px;height:30px;border-radius:50%;
+    border:1px solid rgba(255,255,255,.35);background:rgba(24,18,44,.42);color:#fff;font-size:15px;
+    line-height:1;cursor:pointer;backdrop-filter:blur(6px);-webkit-backdrop-filter:blur(6px);padding:0}
+  .bgm-btn:hover{background:rgba(24,18,44,.6)}
   .slot.locked{opacity:.45;filter:grayscale(.8);cursor:not-allowed}
   .slot.locked em{font-size:15px}
   .slot.empty em{font-style:normal;font-size:20px}
@@ -661,6 +666,7 @@
 
     <!-- 右上：宠物槽（多只宠物切换） -->
     <div class="float-panel slots-float"><div class="pet-slots" id="petSlots"></div></div>
+<button class="bgm-btn" id="bgmBtn" data-action="bgm" title="背景音乐：开（点击关闭）">🎵</button>
 
 
     <!-- 屏幕页面：由上方图标打开（商店 / 背包 / 佩饰 / 房间 / 抽卡 / 积分） -->
@@ -1084,7 +1090,7 @@
       inv: { basic: 3 }, hasToy: false, seenItems: {}, wear: {}, placed: {}, furnOwn: {}, edit: false, sel: '',
       theme: 'sakura', accent: '', camYaw: 0, camZoom: 1,
       best: {},
-      decos: {}, collection: [], picked: false, banner: 'whale', pity: 0,
+      decos: {}, collection: [], picked: false, bgm: true, banner: 'whale', pity: 0,
       title: '', decor: false, memoUnlocked: false, gearGiven: false,
       pulls: 0, lastTick: Date.now(), workReady: 0
     };
@@ -1908,16 +1914,32 @@
   }
   /* ---- 宠物模拟：自主走动（不出界）、被拖高后掉落 ---- */
   const CRIES = { goose:'咕…', cat:'喵…', dragon:'呜…', hoshino:'呜…', whale:'咕噜…', gpt:'呜…', claude:'唔…', gemini:'呜…' };
-  let AUDIO = null;
+  let AUDIO = null, ABUS = null;
+  const MUSIC_VOL = 0.10;                  // 音乐音量（刻意压低，给宠物叫声让路）
+  const SFX_VOL   = 0.34;                  // 音效/叫声音量（约 3.4 倍 → 叫声一定盖过音乐）
   function audioCtx() {
     try {
       const C = (typeof window !== 'undefined') && (window.AudioContext || window.webkitAudioContext);
       if (!C) return null;
       if (!AUDIO) AUDIO = new C();
       if (AUDIO.state === 'suspended' && AUDIO.resume) AUDIO.resume();
+      if (ABUS && ABUS.ctx !== AUDIO) ABUS = null;
+      if (!ABUS) {                                       // 建两条总线：music（低）/ sfx（高）
+        const master = AUDIO.createGain(); master.gain.value = 1;
+        if (master.connect) master.connect(AUDIO.destination);
+        const music = AUDIO.createGain(); music.gain.value = MUSIC_VOL;
+        const lp = AUDIO.createBiquadFilter ? AUDIO.createBiquadFilter() : null;
+        if (lp) { lp.type = 'lowpass'; lp.frequency.value = 2400; music.connect(lp); lp.connect(master); }
+        else if (music.connect) music.connect(master);
+        const sfx = AUDIO.createGain(); sfx.gain.value = SFX_VOL;
+        if (sfx.connect) sfx.connect(master);
+        ABUS = { ctx: AUDIO, master: master, music: music, sfx: sfx, noise: null };
+      }
+      BGM.ac = AUDIO;                                  // 合成音符时要用到
       return AUDIO;
     } catch (e) { return null; }
   }
+  function sfxBus(ac) { return (ABUS && ABUS.sfx) || ac.destination; }
   function playCry() {                      // 合成一声「叫」，不依赖任何音频文件
     const ac = audioCtx();
     if (!ac) return;
@@ -1928,13 +1950,179 @@
       osc.frequency.setValueAtTime(900, t0);
       osc.frequency.exponentialRampToValueAtTime(430, t0 + 0.18);
       g.gain.setValueAtTime(0.0001, t0);
-      g.gain.exponentialRampToValueAtTime(0.20, t0 + 0.02);
+      g.gain.exponentialRampToValueAtTime(0.28, t0 + 0.02);   // 叫声本身也调响一点
       g.gain.exponentialRampToValueAtTime(0.0001, t0 + 0.26);
       osc.connect(g);
-      if (g.connect) g.connect(ac.destination);
+      if (g.connect) g.connect(sfxBus(ac));                   // 走音效总线 → 盖过音乐
       osc.start(t0);
       osc.stop(t0 + 0.28);
     } catch (e) {}
+    bgDuck();                                                 // 叫的时候把音乐再压一下
+  }
+  /* ================= 背景音乐：Web Audio 现场合成（零音频文件） ================= */
+  const BGM = { on: true, track: '', step: 0, nextT: 0, timer: 0, wired: false, ready: false };
+  const nf = m => 440 * Math.pow(2, (m - 69) / 12);                 // MIDI → 频率
+  const BGM_TEMPO = { home: 74, dungeon: 152 };                      // 温馨慢 / 地牢快
+  const BGM_RES   = { home: 2, dungeon: 4 };                         // 每拍细分：8 分 / 16 分
+  // 和弦进行：home = C-Am-F-G（大调温暖）；dungeon = Am-F-C-G（小调推进）
+  const BGM_CHORDS = {
+    home:    [[60, 64, 67, 72], [57, 60, 64, 69], [53, 57, 60, 65], [55, 59, 62, 67]],
+    dungeon: [[57, 60, 64], [53, 57, 60], [60, 64, 67], [55, 59, 62]]
+  };
+  function bgNoise(ac) {                                             // 白噪声（做鼓用，只生成一次）
+    if (ABUS.noise) return ABUS.noise;
+    try {
+      const len = Math.floor(ac.sampleRate * 0.25);
+      const buf = ac.createBuffer(1, len, ac.sampleRate);
+      const d = buf.getChannelData(0);
+      for (let i = 0; i < len; i++) d[i] = Math.random() * 2 - 1;
+      ABUS.noise = buf;
+      return buf;
+    } catch (e) { return null; }
+  }
+  function bgTone(t, freq, dur, type, vol, bus, glideTo, filt) {
+    try {
+      const ac = BGM.ac; if (!ac) return;
+      const o = ac.createOscillator(), g = ac.createGain();
+      o.type = type || 'sine';
+      o.frequency.setValueAtTime(freq, t);
+      if (glideTo) o.frequency.exponentialRampToValueAtTime(Math.max(20, glideTo), t + dur);
+      g.gain.setValueAtTime(0.0001, t);
+      g.gain.exponentialRampToValueAtTime(Math.max(0.0002, vol), t + Math.min(0.05, dur * 0.3));
+      g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+      o.connect(g);
+      let tail = g;
+      if (filt && ac.createBiquadFilter) {
+        const lp = ac.createBiquadFilter(); lp.type = 'lowpass';
+        lp.frequency.setValueAtTime(filt[0], t);
+        if (filt[1]) lp.frequency.exponentialRampToValueAtTime(filt[1], t + dur);
+        g.connect(lp); tail = lp;
+      }
+      if (tail.connect) tail.connect(bus || (ABUS && ABUS.music) || ac.destination);
+      o.start(t); o.stop(t + dur + 0.02);
+    } catch (e) {}
+  }
+  function bgHit(t, vol, dur, hp) {                                  // 噪声打击（军鼓/踩镲）
+    try {
+      const ac = BGM.ac; if (!ac) return;
+      const buf = bgNoise(ac); if (!buf) return;
+      const src = ac.createBufferSource(), g = ac.createGain(), f2 = ac.createBiquadFilter ? ac.createBiquadFilter() : null;
+      src.buffer = buf;
+      g.gain.setValueAtTime(Math.max(0.0002, vol), t);
+      g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+      if (f2) { f2.type = 'highpass'; f2.frequency.value = hp || 1200; src.connect(f2); f2.connect(g); }
+      else src.connect(g);
+      if (g.connect) g.connect((ABUS && ABUS.music) || ac.destination);
+      src.start(t); src.stop(t + dur + 0.02);
+    } catch (e) {}
+  }
+  function bgStep(track, st, t, sd, res) {                           // 按拍调度一个小节
+    const chords = BGM_CHORDS[track];
+    if (!chords) return;
+    const perBar = res * 4, bar = Math.floor(st / perBar) % chords.length, k = st % perBar;
+    const ch = chords[bar], root = ch[0] - 24;
+    if (track === 'home') {
+      // 温馨：长垫和弦 + 缓慢贝斯 + 轻柔琶音 + 偶发风铃
+      if (k === 0) ch.forEach(m => bgTone(t, nf(m), sd * res * 4, 'triangle', 0.05, (ABUS && ABUS.music), null, [1600, 900]));
+      if (k === 0 || k === perBar / 2) bgTone(t, nf(root), sd * res * 1.6, 'sine', 0.075, (ABUS && ABUS.music));
+      const arp = ch.concat(ch.slice(1, -1).reverse());
+      bgTone(t, nf(arp[st % arp.length] + 12), sd * 1.5, 'triangle', 0.045, (ABUS && ABUS.music));
+      if (k === 0 && bar % 2 === 1) bgTone(t, nf(ch[2] + 24), sd * 3, 'sine', 0.07, (ABUS && ABUS.music));
+    } else {
+      // 地牢：驱动贝斯 + 快速琶音 + 鼓点 + 亮点 stab
+      if (k % 2 === 0) bgTone(t, nf(root), sd * 1.4, 'sawtooth', 0.055, (ABUS && ABUS.music), null, [900, 260]);
+      bgTone(t, nf(ch[(st * 2) % ch.length] + 12), sd * 0.8, 'square', 0.032, (ABUS && ABUS.music), null, [2600, 1200]);
+      if (k === 0 || k === perBar / 2) bgTone(t, 130, 0.16, 'sine', 0.13, (ABUS && ABUS.music), 45);        // 底鼓
+      if (k === res || k === perBar - res) bgHit(t, 0.075, 0.12, 1400);                                     // 军鼓
+      if (k % 2 === 0) bgHit(t, 0.028, 0.045, 5200);                                                        // 踩镲
+      if (k === 0 && (bar === 0 || bar === 2)) bgTone(t, nf(ch[1] + 24), sd * 2, 'sawtooth', 0.045, (ABUS && ABUS.music), null, [3200, 1200]);
+    }
+  }
+  function bgTick() {
+    const ac = BGM.ac;
+    if (!ac || !BGM.on || !BGM.track) return;
+    const spb = 60 / BGM_TEMPO[BGM.track], res = BGM_RES[BGM.track], sd = spb / res;
+    const now = ac.currentTime;
+    if (!BGM.nextT || BGM.nextT < now - 0.5) BGM.nextT = now + 0.06;
+    let guard = 0;
+    while (BGM.nextT < now + 0.4 && guard++ < 128) {
+      bgStep(BGM.track, BGM.step++, BGM.nextT, sd, res);
+      BGM.nextT += sd;
+    }
+  }
+  function bgKick() {
+    if (!BGM.ready) return;                            // 还没拿到用户手势：不调度（浏览器会自动播放拦截）
+    if (BGM.timer) return;
+    BGM.timer = setInterval(bgTick, 60);
+    bgTick();
+  }
+  function bgPlay(track) {
+    const want = track || 'home';
+    BGM.track = want;
+    if (!BGM.on || !BGM.ready) return;                                 // 记住曲目，等用户手势后播
+    const ac = audioCtx();
+    if (!ac || !ABUS) return;
+    BGM.ac = ac;
+    if (BGM.track === want) { bgKick(); return; }
+    BGM.track = want; BGM.step = 0; BGM.nextT = 0;
+    try { ABUS.music.gain.cancelScheduledValues(ac.currentTime); ABUS.music.gain.setValueAtTime(MUSIC_VOL, ac.currentTime); } catch (e) {}
+    bgKick();
+  }
+  function bgDuck(dur) {                                               // 叫声期间压低音乐
+    const ac = BGM.ac;
+    if (!ac || !ABUS || !ABUS.music) return;
+    try {
+      const t = ac.currentTime, g = ABUS.music.gain, back = BGM.on ? MUSIC_VOL : 0.0001;
+      g.cancelScheduledValues(t);
+      g.setValueAtTime(Math.max(0.0001, MUSIC_VOL * 0.28), t);
+      g.linearRampToValueAtTime(back, t + (dur || 0.6));
+    } catch (e) {}
+  }
+  function bgToggle() {
+    BGM.on = !BGM.on;
+    const ac = audioCtx();
+    if (ac && ABUS && ABUS.music) {
+      try {
+        const g = ABUS.music.gain;
+        g.cancelScheduledValues(ac.currentTime);
+        g.setValueAtTime(BGM.on ? MUSIC_VOL : 0.0001, ac.currentTime);
+      } catch (e) {}
+    }
+    if (!BGM.on) { BGM.step = 0; BGM.nextT = 0; }
+    else { BGM.ready = true; bgPlay(BGM.track || 'home'); }
+    state.bgm = BGM.on; save();
+    bgPaint();
+    toast(BGM.on ? '🎵 背景音乐：开（宠物叫会盖过音乐）' : '🔇 背景音乐：关');
+  }
+  function bgPaint() {
+    const b = el('bgmBtn');
+    if (!b) return;
+    b.textContent = BGM.on ? '🎵' : '🔇';
+    b.title = BGM.on ? '背景音乐：开（点击关闭）' : '背景音乐：关（点击开启）';
+  }
+  function bgFirstGesture() {                                          // 浏览器要求先有交互才能放声音
+    const ac = audioCtx();
+    if (!ac) return;
+    if (!BGM.track) BGM.track = (typeof RL !== 'undefined' && RL.on) ? 'dungeon' : 'home';
+    if (!BGM.ready) { BGM.ready = true; BGM.step = 0; BGM.nextT = 0; }
+    bgPlay(BGM.track);
+    bgPaint();
+  }
+  function bgWire() {
+    if (BGM.wired || typeof document === 'undefined') return;
+    BGM.wired = true;
+    ['pointerdown', 'keydown', 'touchstart'].forEach(ev => {
+      try { document.addEventListener(ev, bgFirstGesture, true); } catch (e) {}
+    });
+    if (typeof document !== 'undefined' && document.addEventListener) {
+      document.addEventListener('visibilitychange', function () {      // 切走时静音，回来续播
+        if (!AUDIO) return;
+        try {
+          if (document.hidden) { if (AUDIO.suspend) AUDIO.suspend(); }
+          else if (BGM.on) { if (AUDIO.resume) AUDIO.resume(); bgKick(); }
+        } catch (e) {}
+      });
+    }
   }
   function cryBubble(text) {
     const layer = el('fxLayer');
@@ -2265,6 +2453,7 @@
         };
       });
     }
+    st.bgm = !(d && d.bgm === false);                   // 背景音乐开关（老档默认开）
     st.welcome = !!(d && d.welcome);
     st.picked = (d && d.picked === undefined) ? true : !!(d && d.picked);   // 老档直接算已选定
     st.furnOwn = {};
@@ -3306,6 +3495,8 @@ function rlStart() {
   RL.ctx = cv.getContext('2d');
   rlWire(cv);
   rlGoFullscreen();
+  bgPlay('dungeon');                                   // 地牢：激动音乐
+  bgPaint();
   p.energy = clamp(p.energy - RL_COST);
   RL.floor = 1; RL.hp = RL.maxhp = 6;
   RL.inv = 0; RL.credits = 0; RL.gold = 0; RL.skills = [];
@@ -3339,6 +3530,7 @@ function rlNextFloor() {
 
 function rlFinish(win) {
   RL.on = false; RL.over = true; RL.win = !!win;
+  bgPlay('home');                                      // 结算画面回到温馨音乐
   if (RL.raf && typeof cancelAnimationFrame === 'function') cancelAnimationFrame(RL.raf);
   RL.raf = 0; RL.keys = {};
   const p = P();
@@ -3374,6 +3566,7 @@ function rlExitFullscreen() {
   } catch (err) {}
 }
 function rlClose() {
+  bgPlay('home');                                      // 离开地牢：回到主界面温馨音乐
   const sb = el('rlShop');
   if (sb) { sb.className = 'rl-shop'; sb.innerHTML = ''; }
   rlExitFullscreen();
@@ -4296,6 +4489,7 @@ function rlWire(cv) {
         case 'mini':  return startGame('disc');
         case 'adopt': return openAdopt();                  // 顶部 🐾：再点收起
         case 'adoptopen': return openAdopt(true);          // 「＋」/按钮：只打开（修：以前会误关）
+        case 'bgm':       return bgToggle();               // 背景音乐开/关
         case 'adoptpick': return adopt(arg);
         case 'adoptclose': return closeAdopt();
         case 'switch': return switchPet(Number(arg));
@@ -4478,7 +4672,11 @@ function rlWire(cv) {
     render();
     if (msg) toast(msg);
     if (!storageOK) toast('⚠️ 浏览器禁止本地存储，进度无法自动保存，请到「💾 存档」导出备份');
-    // 像素 LCD 渲染器：启动即开帧循环（Canvas 2D 必定可用）
+    bgWire();                                            // 绑定"首次交互后开始播放音乐"
+  if (state.bgm === false) BGM.on = false;
+  bgPaint();
+  bgPlay('home');                                      // 主界面：温馨音乐（等用户手势后真正出声）
+  // 像素 LCD 渲染器：启动即开帧循环（Canvas 2D 必定可用）
     try { pxStart(); } catch (e) { PX.err = String(e); }
     render();
     if (typeof window !== 'undefined' && window.addEventListener) {
