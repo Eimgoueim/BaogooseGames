@@ -1804,6 +1804,45 @@
     ctx.restore();
     return headTop;
   }
+  /* ---- 睡觉动画：被窝 / 有床就睡床上 ---- */
+  function sleepSpot(p) {
+    const b = state.placed && state.placed.bed;
+    if (b) {
+      const sc = Number(b.s) || 1;
+      return { x: Math.round((Number(b.x) || 0.5) * PXW), y: Math.round((Number(b.y) || 0.9) * PXH), s: sc, onBed: true };
+    }
+    const at = petAt(p);
+    return { x: at.cx, y: at.by, s: 1, onBed: false };
+  }
+  function pxSleep(p) {
+    const sp = sleepSpot(p);
+    const breath = Math.round(Math.sin(PX.t * 1.5));                 // 呼吸：被子上下 1 像素
+    const pcx = sp.onBed ? sp.x - Math.round(4 * sp.s) : sp.x;       // 床上有枕头的那一头
+    const pby = sp.onBed ? sp.y - Math.round(4 * sp.s) : sp.y;
+    pxDrawPet(p, { cx: pcx, by: pby });                             // 宠物本体（闭眼 + Zzz 由它负责）
+    const qw = sp.onBed ? Math.round(22 * sp.s) : 30;
+    const qh = sp.onBed ? Math.round(10 * sp.s) : 13;
+    const qx = Math.round(sp.x - qw / 2);
+    const qy = pby - 8 + breath;                                     // 被子只盖到嘴巴以下，头露出来
+    if (!sp.onBed) {                                                // 没床：地板被窝 + 枕头
+      pxFill(qx - 3, qy + 3, 7, qh - 3, '#f2f6fb');
+      pxFill(qx - 3, qy + 3, 7, 1, '#ffffff');
+    }
+    pxFill(qx, qy + qh - 3, qw, 3, '#7fa9d8');                      // 被子暗部
+    pxFill(qx, qy, qw, qh, '#9fc4ee');                              // 被子主体
+    pxFill(qx, qy, qw, 2, '#cfe4fb');                               // 翻边
+    pxFill(qx, qy, 2, qh, '#cfe4fb');
+    pxFill(qx + qw - 2, qy, 2, qh, '#cfe4fb');
+    for (let i = 4; i < qw - 6; i += 7) {                           // 小圆点花纹
+      pxFill(qx + i, qy + 5, 2, 2, '#ffffff');
+      if (qh > 10) pxFill(qx + i + 3, qy + 9, 2, 2, '#ffffff');
+    }
+    const zt = PX.t % 2.2;                                          // 再飘一个 z
+    const zx = pcx + 9, zy = pby - 24 - Math.round(zt * 3);
+    pxFill(zx, zy, 4, 1, '#cfd9f5');
+    pxFill(zx + 1, zy + 1, 2, 1, '#cfd9f5');
+    pxFill(zx, zy + 2, 4, 1, '#cfd9f5');
+  }
   /* ---- 洗澡动画：浴缸 + 泡泡浴 ---- */
   function startBath(p) {
     PX.bath = 3.2;                                      // 动画时长（秒）
@@ -1870,10 +1909,10 @@
     F(0, 6, 1, 1, '#9c7040');
     F(-2, 1, 1, 1, '#46301a');
   }
-  function pxDrawPet(p) {
+  function pxDrawPet(p, at) {
     const key = spOf(p).key;
     const st = stageIdx(p);
-    const pos = petAt(p);
+    const pos = at || petAt(p);                       // at：可指定位置（趴床上/被窝里）
     const cx = pos.cx;
     let by = pos.by;
     if (PX.hop > 0) by -= Math.round(PX.hop * 7);
@@ -1983,6 +2022,7 @@
       pxPoop(at.cx, at.by, 1);
     });
     if (PX.bath > 0) pxBathScene(p);                    // 洗澡动画：浴缸 + 泡泡
+    else if (p.asleep) pxSleep(p);                      // 睡觉动画：趴被窝 / 睡床上
     else pxDrawPet(p);
     if (state.decor && state.memoUnlocked) { pxFill(10, 12, 2, 6, '#ffd97a'); pxFill(8, 14, 6, 2, '#ffd97a'); }
     pxPetHearts(p);
@@ -2792,7 +2832,8 @@
     const k = mode === 'active' ? 1 : 0.5;
     let woke = false;
     if (p.asleep) {
-      p.energy += 6 * (pk.sleepEnergy || 1) * (mode === 'active' ? 1 : 0.5);
+      const onBedBonus = (state.placed && state.placed.bed) ? 1.5 : 1;    // 睡自己的床恢复更快
+      p.energy += 6 * (pk.sleepEnergy || 1) * (mode === 'active' ? 1 : 0.5) * onBedBonus;
       if (pk.sleepMood) p.mood += pk.sleepMood;
       p.hunger -= 0.15 * k; p.mood -= 0.08 * k; p.clean -= 0.10 * k;
       p.health += p.hunger > 25 ? 1.4 * k : -1.0 * k;
@@ -3206,7 +3247,12 @@
   function toggleSleep() {
     const p = P();
     if (p.asleep) { p.asleep = false; toast('☀️ ' + p.name + ' 醒来了'); }
-    else { p.asleep = true; toast('💤 ' + p.name + ' 开始睡觉，精力恢复中…'); }
+    else {
+      p.asleep = true;
+      const hasBed = !!(state.placed && state.placed.bed);
+      toast(hasBed ? '💤 ' + p.name + ' 爬上小床，钻进被窝睡着了…'
+                   : '💤 ' + p.name + ' 趴进被窝睡着了…（摆放一张床就能睡床上）');
+    }
     render(); save();
   }
 
