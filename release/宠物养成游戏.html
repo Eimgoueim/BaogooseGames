@@ -1270,7 +1270,7 @@
       lampGlow: rgbaHex(mixHex(warm, '#ffd9a8', 0.35), 0.20)         // 落地灯的暖光
     };
   }
-  const PX = { cv: null, ctx: null, raf: 0, last: 0, t: 0, face: 'ok', blink: 0, blinkT: 2.5, hop: 0, drag: null, err: '',
+  const PX = { bath: 0, bathBubbles: [], bathT: 0, bathSeed: 0, cv: null, ctx: null, raf: 0, last: 0, t: 0, face: 'ok', blink: 0, blinkT: 2.5, hop: 0, drag: null, err: '',
                dir: 1, walkTo: 0.5, walkToY: 0, walkWait: 0.6, fall: null, landT: 0,
                menu: [], hover: '', pick: '', pickT: 0, annoy: 0, petDrag: null, tap: false };
 
@@ -1804,6 +1804,63 @@
     ctx.restore();
     return headTop;
   }
+  /* ---- 洗澡动画：浴缸 + 泡泡浴 ---- */
+  function startBath(p) {
+    PX.bath = 3.2;                                      // 动画时长（秒）
+    PX.bathBubbles = [];
+    PX.bathT = 0;
+    PX.bathSeed = Math.random() * 10;
+  }
+  function playSplash() {                               // 入水"哗啦"声（走音效总线，比音乐响）
+    const ac = audioCtx();
+    if (!ac || !ABUS) return;
+    try {
+      const t0 = ac.currentTime;
+      const o = ac.createOscillator(), g = ac.createGain();
+      o.type = 'sine';
+      o.frequency.setValueAtTime(260, t0);
+      o.frequency.exponentialRampToValueAtTime(880, t0 + 0.14);
+      g.gain.setValueAtTime(0.0001, t0);
+      g.gain.exponentialRampToValueAtTime(0.24, t0 + 0.02);
+      g.gain.exponentialRampToValueAtTime(0.0001, t0 + 0.3);
+      o.connect(g);
+      if (g.connect) g.connect(sfxBus(ac));
+      o.start(t0); o.stop(t0 + 0.32);
+    } catch (e) {}
+    bgDuck(0.4);
+  }
+  function pxBathTub(cx, by, s) {                       // 浴缸后半：缸体 + 水 + 泡沫
+    s = s || 1;
+    const F = (x, y, w, h, c) => pxFill(cx + x * s, by - y * s, w * s, h * s, c);
+    F(-16, 0, 32, 2, '#c9d4e2');                        // 缸底阴影
+    F(-15, 1, 30, 10, '#eef3fa');                       // 缸体（陶瓷）
+    F(-15, 8, 30, 3, '#dbe4f0');
+    F(-15, 10, 30, 2, '#f7fafd');                       // 缸沿
+    F(-13, 6, 26, 3, '#8fd2ee');                        // 水面
+    F(-13, 8, 26, 1, '#bfe6f8');
+    F(-11, 9, 4, 1, '#ffffff'); F(-2, 9, 5, 1, '#ffffff'); F(7, 9, 3, 1, '#ffffff');   // 泡沫
+  }
+  function pxBathFront(cx, by, s) {                     // 缸前壁（盖住宠物下半身）
+    s = s || 1;
+    const F = (x, y, w, h, c) => pxFill(cx + x * s, by - y * s, w * s, h * s, c);
+    F(-15, 1, 30, 5, '#f2f6fb');
+    F(-15, 4, 30, 1, '#ffffff');                        // 高光
+    F(-15, 0, 30, 1, '#c9d4e2');
+    F(-13, 5, 26, 2, '#9bd6f2');                        // 贴着宠物的水线
+  }
+  function pxBathScene(p) {                             // 完整洗澡画面
+    const at = petAt(p);
+    const bob = Math.round(Math.sin(PX.t * 4) * 1);
+    pxBathTub(at.cx, at.by + 1, 1);
+    // 宠物坐在缸里：只露出上半身（下半身被缸前壁和水盖住）
+    pxPetAt(at.cx, at.by + 3 + bob, spOf(p).key, stageIdx(p), { awake: true, happy: true, dir: PX.dir });
+    pxBathFront(at.cx, at.by + 1, 1);
+    // 泡泡：升起来 → 破掉
+    PX.bathBubbles.forEach(b => {
+      pxFill(b.x - b.r, b.y - b.r, b.r * 2, b.r * 2, '#eef8ff');
+      pxFill(b.x - b.r, b.y - b.r, 1, 1, '#ffffff');
+    });
+  }
   function pxPoop(cx, by, s) {                          // 一小坨像素屎
     s = s || 1;
     const F = (x, y, w, h, c) => pxFill(cx + x * s, by - y * s, w * s, h * s, c);
@@ -1925,7 +1982,8 @@
       const at = petAt(q);
       pxPoop(at.cx, at.by, 1);
     });
-    pxDrawPet(p);
+    if (PX.bath > 0) pxBathScene(p);                    // 洗澡动画：浴缸 + 泡泡
+    else pxDrawPet(p);
     if (state.decor && state.memoUnlocked) { pxFill(10, 12, 2, 6, '#ffd97a'); pxFill(8, 14, 6, 2, '#ffd97a'); }
     pxPetHearts(p);
     drawMenuRow();
@@ -2160,6 +2218,31 @@
   function pxSim(dt) {
     const p = P();
     if (!p) return;
+    // ⓪ 洗澡动画：坐在浴缸里冒泡泡，期间不走动、不拉屎
+    if (PX.bath > 0) {
+      PX.bath -= dt;
+      PX.bathT = (PX.bathT || 0) + dt;
+      p.poopWarn = false;
+      const at = petAt(p);
+      if (PX.bathT > 0.16) {                            // 每 0.16 秒冒一个泡泡
+        PX.bathT = 0;
+        PX.bathBubbles.push({
+          x: at.cx + (Math.random() * 22 - 11),
+          y: at.by - 2,
+          r: Math.random() < 0.5 ? 1 : 2,
+          v: 6 + Math.random() * 8,
+          life: 1
+        });
+      }
+      PX.bathBubbles = PX.bathBubbles.filter(b => {
+        b.y -= b.v * dt;
+        b.x += Math.sin((b.y + PX.bathSeed) * 0.5) * 6 * dt;
+        b.life -= dt * 0.55;
+        return b.life > 0 && b.y > at.by - 30;
+      });
+      if (PX.bath <= 0) { PX.bath = 0; PX.bathBubbles = []; }
+      return;
+    }
     // ⑥ 想拉屎：先抖动 + 大叫预警，到点就拉
     if (!p.asleep && p.poopNext) {
       const left = p.poopNext - Date.now();
@@ -2352,7 +2435,9 @@
         if (ev.preventDefault) ev.preventDefault();
         return;
       }
-      const p = P();                                 // 2.5) 点到屎 → 清理
+      const p = P();
+      if (PX.bath > 0) { PX.tap = false; if (ev.preventDefault) ev.preventDefault(); return; }   // 洗澡动画期间不拖动
+      // 2.5) 点到屎 → 清理
       const pq = pxHitPoop(pt);
       if (pq >= 0) { cleanPoop(pq); PX.tap = false; if (ev.preventDefault) ev.preventDefault(); return; }
       if (pxHitPet(pt, p)) {
@@ -2743,8 +2828,9 @@
     p.poopWarn = false;
     p.clean = clamp(p.clean - 18);
     p.mood = clamp(p.mood - 6);
+    p.hunger = clamp(p.hunger - 5);                     // 拉完更饿：饱食 -5
     fx('💩');
-    toast('💩 ' + p.name + ' 拉了一坨…点它就能清理（或用 🛁 清洁键）');
+    toast('💩 ' + p.name + ' 拉了一坨（饱食 -5）…点它就能清理（或用 🛁 清洁键）');
     render(); save();
   }
   function pxHitPoop(pt) {                              // 点到屎了吗
@@ -3076,9 +3162,12 @@
     }
     p.clean = clamp(p.clean + 48 * (pk.bathGain || 1));
     p.mood  = clamp(p.mood - 4);
+    p.hunger = clamp(p.hunger - 2);                     // 洗澡也消耗一点体力
     addExp(8);
     addAffinity(2);
     fx('🫧');
+    startBath(p);                                       // 播放洗澡动画（浴缸 + 泡泡浴）
+    playSplash();
     toast('🛁 ' + msg + p.name + ' 洗得香喷喷，清洁度大涨！');
     render(); save();
   }
