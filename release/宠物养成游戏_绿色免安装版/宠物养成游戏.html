@@ -1658,8 +1658,19 @@
   }
   // 打开 / 关闭屏幕页面（商店、背包、佩饰、房间、抽卡、积分）
   const OVERLAY_ALL = ['adoptOverlay', 'gachaOverlay', 'hubOverlay', 'miniOverlay', 'saveOverlay', 'themeOverlay', 'dlgOverlay'];
+  // 布置模式收尾：退出布置、把摆放位置落盘（功能键再按一下 / 切到别的界面时调用）
+  function commitFurn() {
+    if (!state.edit) return false;
+    state.edit = false;
+    state.sel = '';
+    PX.drag = null;
+    save();
+    toast('✅ 布置完成，摆放位置已保存');
+    return true;
+  }
   // 同一时间只留一个功能界面：打开前把其它的（含上一页）全部收起，旧的白框就不会留在底下
   function closeOtherPanels(except) {
+    commitFurn();                                       // 打开别的界面 = 布置完成，顺手保存
     for (let i = 0; i < OVERLAY_ALL.length; i++) {
       if (OVERLAY_ALL[i] === except) continue;
       const e = el(OVERLAY_ALL[i]);
@@ -1671,7 +1682,11 @@
     closeOtherPanels('');                                     // 旧的弹窗一并收起，不留白框
     uiTab = key; render();
   }
-  function closePage() { uiTab = ''; render(); }
+  function closePage() {
+    commitFurn();                                       // 再按一下功能键：关掉界面 → 结束布置并保存
+    uiTab = '';
+    render();
+  }
   function menuFire(key) {
     PX.pick = key;
     PX.pickT = 0.5;
@@ -1689,6 +1704,13 @@
     if (menuDisabled(key)) {                        // 下排：不可用时给个说明
       toast('🙅 现在不能「' + m.name + '」' + menuWhy(key));
       return;
+    }
+    // 按了别的功能键：上一个打开的功能界面自己关掉（喂食/游戏有自己的界面逻辑，跳过）
+    if (key !== 'feed' && key !== 'games' && anyUiOpen()) {
+      commitFurn();                                   // 布置中的话顺手保存摆放位置
+      uiTab = '';
+      OVERLAY_ALL.forEach(id => { const e2 = el(id); if (e2 && e2.classList) e2.classList.remove('open'); });
+      render();
     }
     switch (key) {
       case 'feed':  openPage('bag'); break;
