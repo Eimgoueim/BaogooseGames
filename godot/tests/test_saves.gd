@@ -96,6 +96,16 @@ func _initialize() -> void:
 		_check(loaded.ok and loaded.state.pets[0].worn == input.pets[0].worn, "宠物穿戴字段应往返保留")
 	_check(not Codec.normalize(null).ok, "null 应拒绝")
 	_check(not Codec.normalize("save").ok, "字符串应拒绝")
+	for field in ["inv", "placed", "wear", "shards"]:
+		var malformed := _legacy_state()
+		malformed[field] = []
+		_check(not Codec.normalize(malformed).ok, "UI 使用的容器必须拒绝错误类型：" + field)
+	var broken_placement := _legacy_state()
+	broken_placement.placed.lamp = {"x": "invalid"}
+	_check(not Codec.normalize(broken_placement).ok, "家具坐标文本应拒绝")
+	var broken_inventory := _legacy_state()
+	broken_inventory.inv.basic = "invalid"
+	_check(not Codec.normalize(broken_inventory).ok, "背包数量文本应拒绝")
 	var bad_pets := _legacy_state()
 	bad_pets.pets = ["dragon"]
 	_check(not Codec.normalize(bad_pets).ok, "非对象宠物应拒绝")

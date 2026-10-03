@@ -20,7 +20,7 @@ script = script.replace('  boot();', `
         DUP_WEAR_PTS, DEATH_TICKS, REVIVE_COST, REVIVE_SHARDS, SHARDS_ON_DEATH,
         REVIVE_MIN_LV, RL_CHEST_RATE, RL_CHEST_CREDITS, RL_GOLD_RATE,
         RL_CLEAR_BONUS, RL_WELCOME, RL_COST, POOP_MS, POOP_WARN_MS, POOP_MAX}},
-    PX, PLACE, WEAR, MENU, SPECIES, THEMES, pxPetAt, pxWear, drawMenuIcon,
+    PX, PLACE, WEAR, MENU, SPECIES, THEMES, pxPetAt, pxWear, drawMenuIcon, pxPoop, pxBathTub, pxBathFront,
     pxRoom, pxDraw, pxResize, makePet, defaultState,
     reset: () => {state = defaultState(); PX.hearts = []; PX.bath = 0;
       PX.bathBubbles = []; PX.bathSplash = []; PX.face = 'ok'; PX.dir = 1;
@@ -80,7 +80,7 @@ function capture(draw) {
   if (api.error()) throw new Error('原版绘制失败：' + api.error());
   return ctx.commands;
 }
-const art = {pets: {}, furniture: {}, wear: {}, icons: {}, rooms: {}};
+const art = {pets: {}, furniture: {}, wear: {}, icons: {}, rooms: {}, effects: {}};
 for (const key of Object.keys(api.SPECIES)) {
   art.pets[key] = {};
   for (let stage = 0; stage < 4; stage++) for (const pose of ['awake', 'sleep', 'happy', 'sick', 'annoy']) {
@@ -91,6 +91,9 @@ for (const key of Object.keys(api.SPECIES)) {
 for (const [key, value] of Object.entries(api.PLACE)) art.furniture[key] = capture(() => value.draw(0, 0, 1));
 for (const key of Object.keys(api.WEAR)) art.wear[key] = capture(() => api.pxWear(0, -27, 0, key, 1));
 for (const menu of api.MENU) art.icons[menu.key] = capture(() => api.drawMenuIcon(menu.key, 0, 0, '#dCE8C4'));
+art.effects.poop = capture(() => api.pxPoop(0, 0, 1));
+art.effects.bath_back = capture(() => api.pxBathTub(0, 0, 1));
+art.effects.bath_front = capture(() => api.pxBathFront(0, 0, 1));
 
 const fixtures = {};
 function samplePixels(commands, width, height) {
@@ -113,7 +116,9 @@ function fixture(name, configure) {
   const state = api.reset(); api.pxResize(); configure(state);
   const commands = capture(() => api.pxDraw());
   const {width, height} = api.dimensions();
-  fixtures[name] = {width, height, commands, samples: samplePixels(commands, width, height)};
+  fixtures[name] = {width, height, commands, samples: samplePixels(commands, width, height),
+    state: JSON.parse(JSON.stringify(state)), visual: {bath: api.PX.bath, t: api.PX.t,
+      face: api.PX.face, dir: api.PX.dir, hop: api.PX.hop, bob: api.PX.bob, annoy: api.PX.annoy}};
 }
 for (const key of Object.keys(api.THEMES)) {
   fixture(`theme_${key}`, () => api.theme(key));

@@ -26,6 +26,26 @@ static func normalize(raw: Variant) -> Dictionary:
 		return _error("不支持的 HTML 存档版本")
 	if not state.has("pets") or typeof(state.pets) != TYPE_ARRAY:
 		return _error("pets 必须是数组")
+	# UI 与场景会遍历这些容器；拒绝损坏形状，未知字段仍原样保留。
+	for key in ["inv", "seenItems", "wear", "placed", "furnOwn", "best", "decos", "shards"]:
+		if state.has(key) and typeof(state[key]) != TYPE_DICTIONARY:
+			return _error("字段必须是对象：" + key)
+	for key in ["poops", "grave", "collection"]:
+		if state.has(key) and typeof(state[key]) != TYPE_ARRAY:
+			return _error("字段必须是数组：" + key)
+	for key in ["theme", "accent", "banner", "title", "sel"]:
+		if state.has(key) and typeof(state[key]) != TYPE_STRING:
+			return _error("字段必须是文本：" + key)
+	for quantity: Variant in state.get("inv", {}).values():
+		if not _finite_number(quantity): return _error("背包数量无效")
+	for placement: Variant in state.get("placed", {}).values():
+		if typeof(placement) != TYPE_DICTIONARY: return _error("家具位置必须是对象")
+		for key in ["x", "y", "s"]:
+			if placement.has(key) and not _finite_number(placement[key]): return _error("家具位置数值无效")
+	for poop: Variant in state.get("poops", []):
+		if typeof(poop) != TYPE_DICTIONARY: return _error("排泄记录必须是对象")
+		for key in ["lx", "ly", "t"]:
+			if poop.has(key) and not _finite_number(poop[key]): return _error("排泄位置数值无效")
 	if state.pets.is_empty():
 		if typeof(state.get("grave", [])) != TYPE_ARRAY or state.get("grave", []).is_empty():
 			return _error("存档没有宠物或墓碑记录")
@@ -36,6 +56,12 @@ static func normalize(raw: Variant) -> Dictionary:
 		if typeof(state.pets[index]) != TYPE_DICTIONARY:
 			return _error("宠物记录必须是对象")
 		var pet: Dictionary = state.pets[index]
+		if pet.has("worn") and typeof(pet.worn) != TYPE_DICTIONARY:
+			return _error("佩饰记录必须是对象")
+		for accessory: Variant in pet.get("worn", {}).values():
+			if typeof(accessory) != TYPE_STRING: return _error("佩饰标识必须是文本")
+		if pet.has("name") and typeof(pet.name) != TYPE_STRING:
+			return _error("宠物名字必须是文本")
 		if not pet.has("species") or typeof(pet.species) != TYPE_STRING or not SPECIES.has(pet.species):
 			return _error("宠物种类无效")
 		for key in PET_NUMBERS + STATUS_FIELDS:

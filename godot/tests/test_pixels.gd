@@ -3,12 +3,17 @@ extends SceneTree
 # 需要原生图形驱动；以原版 Canvas 指令合成的像素采样为对照。
 const Catalog = preload("res://scripts/legacy_catalog.gd")
 const Canvas = preload("res://scripts/legacy_canvas.gd")
+const Renderer = preload("res://scripts/room_renderer.gd")
 
 func _initialize() -> void:
 	call_deferred("verify_pixels")
 
 func verify_pixels() -> void:
 	var fixtures := Catalog.read_json("res://data/visual_fixtures.json")
+	var catalog := Catalog.load_catalog()
+	var art := Catalog.read_json("res://data/art.json")
+	var native_renderer := Renderer.new()
+	var use_native := OS.get_cmdline_user_args().has("--native")
 	var failures := 0
 	var samples_checked := 0
 	for fixture_name: String in fixtures:
@@ -19,7 +24,7 @@ func verify_pixels() -> void:
 		viewport.render_target_update_mode = SubViewport.UPDATE_ALWAYS
 		root.add_child(viewport)
 		var canvas := Canvas.new()
-		canvas.commands = fixture.commands
+		canvas.commands = native_renderer.build(fixture.state, catalog, art, Vector2(1120, 960), 0, fixture.visual) if use_native else fixture.commands
 		viewport.add_child(canvas)
 		await process_frame
 		await RenderingServer.frame_post_draw
