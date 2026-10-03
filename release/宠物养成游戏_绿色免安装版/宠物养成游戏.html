@@ -65,9 +65,11 @@
   }
 
   /* ---------- 宠物槽 ---------- */
-  .slots-float .pet-slots{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:4px;margin:0;justify-content:end}
+  .slots-float .pet-slots{display:grid;grid-template-columns:repeat(6,minmax(0,1fr));gap:2px 3px;margin:0;justify-content:end}
   @media (max-width:560px){ .pet-slots{grid-template-columns:repeat(3,1fr)} }
-  .slots-float .slots-head{font-size:9.5px;color:#f2ecff;font-weight:800;text-align:right;margin:0 1px 3px;letter-spacing:.2px}
+  .slots-float .slots-head{grid-column:1/-1;font-size:8px;color:#f2ecff;font-weight:800;text-align:right;margin:0 1px 2px;
+    letter-spacing:.1px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;opacity:.95;
+    text-shadow:0 1px 3px rgba(20,12,44,.7)}
   .slot{
     position:relative;display:flex;flex-direction:column;align-items:center;gap:3px;padding:6px 5px;
     border-radius:16px;background:var(--soft);border:1.5px solid var(--line2);cursor:pointer;
@@ -504,10 +506,11 @@
     min-height:0;padding:0;gap:0;border-radius:6px;border:0;background:none;box-shadow:none;
     filter:drop-shadow(0 1px 2px rgba(20,12,44,.5));
   }
-  .slots-float .slot .sart canvas,.slots-float .slot .sart img,.slots-float .slot .sart svg{width:20px;height:auto}
-  .slots-float .slot .snm{font-size:7.5px;color:#fff;font-weight:800;line-height:1.05;max-width:100%;
+  .slots-float .slot .sart canvas,.slots-float .slot .sart img,.slots-float .slot .sart svg{width:15px;height:auto}
+  .slots-float .slot .sart{height:auto}
+  .slots-float .slot .snm{font-size:6.5px;color:#fff;font-weight:800;line-height:1.05;max-width:100%;
     overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-  .slots-float .slot .slv{font-size:7px;color:#ffe9a8;line-height:1.05}
+  .slots-float .slot .slv{font-size:6px;color:#ffe9a8;line-height:1.05}
   .slots-float .slot .sbar{display:none}
   .slots-float .slot .curdot,.slots-float .slot .lim{display:none}
   .slots-float .slot.cur{outline:1.5px solid #ffe9a8;outline-offset:-1px;border-radius:6px}
@@ -556,7 +559,7 @@
     box-shadow:0 12px 26px rgba(60,40,110,.14), inset 0 1px 0 rgba(255,255,255,.65);
     padding:11px 13px;
   }
-  .slots-float{right:2px;top:var(--top-ui, 96px);max-width:min(46vw,240px);padding:0;background:none;border:0;box-shadow:none;
+  .slots-float{right:2px;top:var(--top-ui, 96px);max-width:min(32vw,168px);padding:0;background:none;border:0;box-shadow:none;
     -webkit-backdrop-filter:none;backdrop-filter:none;
     text-shadow:0 1px 3px rgba(20,12,44,.7), 0 0 8px rgba(20,12,44,.45)}
   .slots-float .slots-head{display:block}
@@ -4640,10 +4643,9 @@ function rlWire(cv) {
 
     // 宠物槽
     const unlocked = slotsUnlocked();
-    const slots = ['<div class="slots-head">👤 玩家 Lv.' + playerLevel() + ' · 🐾 宠物 ' + state.pets.length + '/' + unlocked +
-                   ' · 点头像切换出战' +
-                   (unlocked < MAX_PETS ? ' · 升到 Lv.' + (unlocked + 1) + ' 解锁 1 个栏位' : '') +
-                   (state.pets.length > 1 ? ' · 橙框＝在家挨饿' : '') + '</div>'];
+    const slots = ['<div class="slots-head" title="玩家等级 Lv.' + playerLevel() + ' · 宠物 ' + state.pets.length + '/' + unlocked +
+                   ' 只 · 点头像切换出战 · 红框＝危险 橙框＝饿着">👤Lv.' + playerLevel() + ' · 🐾' + state.pets.length + '/' + unlocked +
+                   (unlocked < MAX_PETS ? ' · 升Lv.' + (unlocked + 1) + '解锁' : '') + '</div>'];
     for (let i = 0; i < MAX_PETS; i++) {
       const q = state.pets[i];
       if (!q) {
