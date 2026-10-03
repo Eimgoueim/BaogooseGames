@@ -579,8 +579,9 @@
   @keyframes rollBlink{0%,100%{opacity:.45}50%{opacity:1}}
   /* 最底部：道具使用栏（压扁一排 + 透明底 + 左右箭头翻页；只在功能界面打开时显示） */
   .usebar{
-    position:fixed;left:0;right:0;bottom:0;height:32px;z-index:6;display:none;
-    align-items:center;gap:6px;padding:0 8px;
+    position:fixed;left:0;right:0;bottom:0;height:38px;z-index:6;display:none;
+    align-items:center;gap:6px;padding:0 6px 4px;                 /* 底部留 4px：箭头不再贴屏幕最下沿 */
+    box-sizing:border-box;
     background:rgba(24,18,44,.42);border:0;border-radius:14px 14px 0 0;
     box-shadow:0 -4px 14px rgba(16,10,34,.22);
     -webkit-backdrop-filter:blur(6px);backdrop-filter:blur(6px);
@@ -590,14 +591,15 @@
     text-shadow:0 1px 3px rgba(20,12,44,.75), 0 0 8px rgba(20,12,44,.5)}
   .usebar .ub-track{flex:1;min-width:0;display:flex;align-items:center;gap:5px;overflow:hidden;justify-content:center}
   .usebar .ub-arrow{
-    flex:none;width:22px;height:22px;border:0;border-radius:11px;cursor:pointer;
-    background:rgba(255,255,255,.12);color:#fff;font-size:10px;font-weight:900;line-height:1;
+    flex:none;width:30px;height:30px;border:0;border-radius:15px;cursor:pointer;
+    touch-action:manipulation;                                   /* 触屏也点得动 */
+    background:rgba(255,255,255,.16);color:#fff;font-size:14px;font-weight:900;line-height:1;
     display:flex;align-items:center;justify-content:center;
     box-shadow:0 2px 6px rgba(20,12,44,.35);text-shadow:0 1px 2px rgba(20,12,44,.6);
   }
   .usebar .ub-arrow:disabled{opacity:.28;cursor:default}
   .usebar .ub-chip{
-    flex:none;height:22px;display:flex;align-items:center;gap:4px;padding:0 9px;border:0;border-radius:11px;cursor:pointer;
+    flex:none;height:26px;display:flex;align-items:center;gap:4px;padding:0 9px;border:0;border-radius:11px;cursor:pointer;
     background:rgba(255,255,255,.10);color:#fff;font-size:10px;font-weight:800;line-height:1;
     text-shadow:0 1px 2px rgba(20,12,44,.6);box-shadow:0 2px 6px rgba(20,12,44,.32);
   }
@@ -1658,6 +1660,22 @@
   }
   // 打开 / 关闭屏幕页面（商店、背包、佩饰、房间、抽卡、积分）
   const OVERLAY_ALL = ['adoptOverlay', 'gachaOverlay', 'hubOverlay', 'miniOverlay', 'saveOverlay', 'themeOverlay', 'dlgOverlay'];
+  // 家具旁的「确定 / 取消」：确定=记为基准；取消=还原到开始摆放前
+  function furnSnapshot() { return JSON.parse(JSON.stringify(state.placed || {})); }
+  function furnConfirm(keep) {
+    if (keep) {
+      PX.furnBase = furnSnapshot();
+      save();
+      toast('✅ 摆好了（已保存）');
+    } else {
+      if (PX.furnBase) state.placed = JSON.parse(JSON.stringify(PX.furnBase));
+      PX.drag = null;
+      PX.furnBtns = null;
+      save(); render();
+      toast('↩️ 已取消，位置还原到开始摆放前');
+    }
+    if (PX.ctx) pxDraw();
+  }
   // 布置模式收尾：退出布置、把摆放位置落盘（功能键再按一下 / 切到别的界面时调用）
   function commitFurn() {
     if (!state.edit) return false;
@@ -1931,6 +1949,24 @@
     F(0, 6, 1, 1, '#9c7040');
     F(-2, 1, 1, 1, '#46301a');
   }
+  // 选中的家具旁边画「绿勾(确定) / 红叉(取消)」两个小按钮
+  function pxFurnBtns(o) {
+    const w = o.it.w * o.px.s, h = o.it.h * o.px.s;
+    let bx = Math.round(o.px.x + w / 2 + 3);
+    let by = Math.round(o.px.y - h - 3);
+    bx = Math.max(2, Math.min(PXW - 24, bx));
+    by = Math.max(PXTOP_Y + PXMENU_H + 4, Math.min(PXMENU_Y - 14, by));
+    pxFill(bx - 1, by - 1, 11, 11, 'rgba(12,9,26,.5)');
+    pxFill(bx, by, 9, 9, '#4fc9a8');                          // 绿勾
+    pxFill(bx + 1, by + 4, 2, 2, '#ffffff'); pxFill(bx + 3, by + 6, 2, 2, '#ffffff');
+    pxFill(bx + 5, by + 3, 2, 2, '#ffffff'); pxFill(bx + 6, by + 1, 2, 2, '#ffffff');
+    const c2 = bx + 12;
+    pxFill(c2 - 1, by - 1, 11, 11, 'rgba(12,9,26,.5)');
+    pxFill(c2, by, 9, 9, '#ff6b6b');                          // 红叉
+    pxFill(c2 + 1, by + 1, 2, 2, '#ffffff'); pxFill(c2 + 6, by + 6, 2, 2, '#ffffff');
+    pxFill(c2 + 6, by + 1, 2, 2, '#ffffff'); pxFill(c2 + 1, by + 6, 2, 2, '#ffffff');
+    PX.furnBtns = { ok: { x: bx, y: by, w: 9, h: 9 }, no: { x: c2, y: by, w: 9, h: 9 } };
+  }
   function pxDrawPet(p, at) {
     const key = spOf(p).key;
     const st = stageIdx(p);
@@ -2030,6 +2066,7 @@
     items.forEach(o => {
       o.px = { x: Math.round(o.pos.x * PXW), y: Math.round(o.pos.y * PXH), s: o.pos.s || 1 };   // 比例坐标 → 逻辑像素
       const sel = state.edit && state.sel === o.k;
+      if (!state.edit) PX.furnBtns = null;
       if (sel) pxFill(o.px.x - 1, 0, 1, PXH, 'rgba(139,123,255,.35)');
       try { o.it.draw(o.px.x, o.px.y, o.px.s); } catch (e) { PX.err = String(e && e.message ? e.message : e); }
       if (sel) {
@@ -2037,6 +2074,7 @@
         const x0 = o.px.x - w / 2, y0 = o.px.y - h;
         pxFill(x0, y0, w, 1, '#8b7bff'); pxFill(x0, y0 + h - 1, w, 1, '#8b7bff');
         pxFill(x0, y0, 1, h, '#8b7bff'); pxFill(x0 + w - 1, y0, 1, h, '#8b7bff');
+        pxFurnBtns(o);                                       // 家具旁的绿勾/红叉
       }
     });
     (state.poops || []).forEach(q => {                  // 地上的屎
@@ -2490,6 +2528,12 @@
       const icon = menuAt(pt);                       // 1) 触摸 LCD 图标栏
       if (icon) { menuFire(icon.key); PX.drag = null; PX.petDrag = null; PX.tap = false; if (ev.preventDefault) ev.preventDefault(); return; }
       if (state.edit) {                              // 2) 布置模式：拖动家具
+        const fb = PX.furnBtns;                      // 2.1) 先判「绿勾 / 红叉」
+        if (fb && state.sel) {
+          const inBox = b2 => pt.x >= b2.x - 4 && pt.x <= b2.x + b2.w + 4 && pt.y >= b2.y - 4 && pt.y <= b2.y + b2.h + 4;
+          if (inBox(fb.ok)) { furnConfirm(true); if (ev.preventDefault) ev.preventDefault(); return; }
+          if (inBox(fb.no)) { furnConfirm(false); if (ev.preventDefault) ev.preventDefault(); return; }
+        }
         const hit = pxHitTest(pt);
         if (hit) { state.sel = hit.k; PX.drag = { k: hit.k, dx: pt.x - hit.px.x, dy: pt.y - hit.px.y }; }
         else { state.sel = ''; PX.drag = null; }
@@ -2987,7 +3031,7 @@
   }
   function usePageSize() {
     const vw = Math.max(320, (typeof window !== 'undefined' && window.innerWidth) || 1024);
-    return Math.max(3, Math.floor((vw - 92) / 92));        // 一排能放几个（压扁的一排，留余量不裁切）
+    return Math.max(3, Math.floor((vw - 112) / 92));       // 一排能放几个（箭头加大后留足余量，不裁切）
   }
   function useShift(d) {
     const keys = barSet().keys, size = usePageSize();      // 按当前功能键对应的那类道具翻页
@@ -4765,12 +4809,14 @@ function rlWire(cv) {
         case 'pet':   return petPet();
         case 'edit':
           state.edit = !state.edit;
-          if (!state.edit) { state.sel = ''; PX.drag = null; }
+          if (state.edit) { PX.furnBase = JSON.parse(JSON.stringify(state.placed || {})); }   // 记基准，红叉可还原
+          if (!state.edit) { state.sel = ''; PX.drag = null; PX.furnBtns = null; }
           toast(state.edit ? '🛋️ 布置模式：拖动家具摆放位置，滚轮或滑块调大小' : '✅ 布置完成，已保存');
           render(); save(); return;
         case 'sel':
-          state.edit = true;
           if (!pxOwned(arg)) { toast('还没有这件家具/装饰品，先去商店买或者抽卡'); return; }
+          if (!state.edit) PX.furnBase = JSON.parse(JSON.stringify(state.placed || {}));       // 直接点家具 = 进入布置，先记基准
+          state.edit = true;
           if (!state.placed) state.placed = {};
           if (state.placed[arg]) { state.sel = arg; }
           else if (pxAdd(arg)) { state.sel = arg; toast('已放到房间里，拖动调整位置'); }
