@@ -1,105 +1,41 @@
 # 🤝 参与开发 / Contributing
 
-感谢愿意一起来改这个游戏！这个项目非常轻量：**一个 HTML 文件就是整个游戏**，没有构建步骤、没有依赖。
+项目已完成迁移并将 **Godot 作为后续开发主线**。新功能、修复、UI、美术与玩法维护均在 `godot/` 中实现；原 HTML 及其发布包保留为历史参考。
 
----
-
-## 一、最快上手（3 分钟）
+## 一、上手
 
 ```bash
 git clone https://github.com/Eimgoueim/BaogooseGames.git
 cd BaogooseGames
 ```
 
-然后**直接用浏览器打开 `宠物养成游戏.html`**（推荐 Edge / Chrome / Firefox）就能玩。
-改完代码保存 → 刷新页面 → 立刻看到效果，不需要编译、不需要装 Node/Python。
+使用 Godot 4.7.2 导入 `godot/project.godot`，按 F5 运行。详细启动、模块结构和验证命令见 [Godot README](godot/README.md)。
 
-> 唯一需要 Windows 的场景：打 Windows 安装包（见 `packaging/`）。改游戏本身在 mac / Linux 上也能做。
+## 二、提交流程
 
----
+非协作者先 Fork 再创建功能分支；协作者也应在分支开发，不直接推送 `main`。通过 Pull Request 说明改动、验证结果；涉及界面时附截图。
 
-## 二、提交改动的流程（推荐 Pull Request）
+分支前缀使用 `feat/`、`fix/`、`tweak/` 或 `docs/`。每次 PR 聚焦一个问题，冲突解决后重新验证受影响模块。
 
-如果你**不是**仓库协作者：
+## 三、开发约定
 
-1. 点仓库右上角 **Fork**，把仓库复制到你自己的账号下
-2. clone 你的 fork，开个分支改代码：
-   ```bash
-   git checkout -b feat/小地图图标
-   git commit -m "feat: 小地图加上宝箱房图标"
-   git push origin feat/小地图图标
-   ```
-3. 回到 GitHub 点 **Compare & pull request**，写清楚：**改了什么 / 怎么测的 / 截图或 GIF（有更好）**
-4. 等维护者 review，通过后合并
+1. **Godot 为准**：修改原生场景、GDScript、shader 与配置，不以修改 HTML 再重新提取作为后续开发方式。`tools/extract_legacy.mjs` 和行为夹具生成器仅用于历史回归对照；重新生成会覆盖数据，只有明确更新历史基准时才运行。
+2. **保持内容一致**：沿用现有原创像素素材、UI、文案和数值。功能或玩法调整按明确需求实施，已有规则问题独立记录和修复。
+3. **职责分离**：领域逻辑操作状态并发送事件，主场景负责界面、保存和奖励入账；避免重复结算或让展示逻辑修改经济状态。
+4. **存档兼容**：新增字段时补默认值、旧档规范化及必要的兼容验证，保留未知字段；导入失败不能覆盖当前状态。
+5. **主题一致**：新增 UI 使用现有主题配色和控件样式，检查六套主题及不同窗口尺寸。
+6. **素材原创、离线可用**：不引入 CDN、未经授权的图片或字体；依赖和外部资源应有明确需求。
+7. **数值集中配置**：复用现有配置与常量，避免同一规则分散硬编码。
+8. **注释写中文**：遵循现有 GDScript 风格。
 
-如果你是**协作者（Collaborator）**：可以直接在仓库里开分支推送，但**请不要直接推 `main`** —— 一样走 PR，方便回退和 review。
+## 四、验证
 
-### 分支命名建议
+按改动范围运行 `godot/tests/` 中对应测试，完整命令见 [Godot README](godot/README.md)。涉及规则时检查领域与集成测试；涉及像素渲染时运行图形环境下的像素对照。历史 JS 夹具验证迁移基准；新需求明确修改规则时，应同步新增原生验证，不要求继续匹配旧行为。
 
-| 前缀 | 用途 | 例子 |
-|---|---|---|
-| `feat/` | 新功能 | `feat/宠物进化` |
-| `fix/` | 修 bug | `fix/领养面板误关` |
-| `tweak/` | 数值 / 手感 / 文案调整 | `tweak/地牢怪更少` |
-| `docs/` | 只改文档 | `docs/补充构建说明` |
+人工检查受影响功能、六主题、房间输入、地牢进入/退出与存档重启恢复。字体、手柄和动态视觉验收记录继续保留在 [迁移记录](docs/GODOT_MIGRATION.md)，切换开发主线不代表这些检查已自动完成。
 
----
+## 五、发布
 
-## 三、这个项目的代码约定（重要）
+后续使用 Godot 导出流程。目前没有新的 Godot 安装包；`packaging/` 和 `release/` 中的 HTML 打包脚本及旧产物保留作历史参考，不作为 Godot 发布流程。
 
-`宠物养成游戏.html` 里所有东西都是内联的，请遵守这些约定，否则容易把游戏改坏：
-
-1. **零外部依赖**：不要引入 CDN、外部图片、外部字体、npm 包。所有像素画都是代码里用 `pxFill` / 矩形画出来的 ❌ 不要放官方素材或来路不明的图片
-2. **一个界面同时只开一个**：新开面板要调 `closeOtherPanels('xxxOverlay')`，面板切换用 toggle（再点一次关闭）
-3. **按钮统一走事件委托**：HTML 里写 `data-action="动作名"` 或 `data-action="动作名:参数"`，然后在 `handle(action, arg)` 的 `switch` 里加 `case`
-4. **存档要能平滑升级**：`state` 加新字段时，改 `defaultState()` 之外，**必须**在 `normalizeSave()` 里给老存档兜底（判断字段不存在时给默认值），否则老玩家存档会坏
-5. **游戏循环不能死**：`requestAnimationFrame` 的循环里，任何可能抛错的代码都要 `try/catch`（项目里用 `pxSoftError`），并且**先续期下一帧再干活** —— 否则一次异常就让画面永久定格（历史上真出过这个卡死 bug）
-6. **地牢（肉鸽）相关**：常量都在 `RL_*` 前缀里（概率、奖励、层数），改数值优先改常量，不要散落在逻辑里
-7. **主题**：新颜色请用 CSS 变量（`--warm` / `--card` / `--bg2` 等），让 6 套主题都能正常显示
-8. **注释写中文**，和现有代码保持一致
-
-### Godot 迁移约定
-
-Godot 工程位于 `godot/`，迁移目标是只替换底层架构，保留原版 UI、美术、文案、数值和玩法。新增 Godot 代码时遵循 [迁移说明](docs/GODOT_MIGRATION.md) 和 [Godot 工程说明](godot/README.md)：先以原 HTML 为准，按功能逐项核对视觉与行为；不得借迁移悄悄修复旧版 bug，修 bug 应单独提出并记录。Godot 页面成为主要入口前，必须完成全功能迁移与对照验证。
-
-原版 HTML 的约定仍适用于 HTML 改动。若 Godot 迁移要求与本节前述单 HTML 约定冲突，**Godot 改动以 Godot 迁移文档为准**；这不改变 HTML 原版的发布与贡献流程。
-
-本机已验证环境为 Godot 4.7.2（`D:/godot`）；其他环境建议使用 Godot 4.7.2。阶段一可用以下命令校验工程与存档 codec：
-
-```powershell
-godot --headless --editor --path godot --quit
-godot --headless --path godot --script res://tests/test_saves.gd
-```
-
-`F5` 启动原生游戏主场景，已接入养成、抽卡、地牢、音频及存档；固定 Canvas 基准请运行 `parity_viewer.tscn`。完整 UI 视觉仍需人工验收，验证命令见 Godot README。
-
----
-
-## 四、动手改之前先自测
-
-项目没有自动化测试，请至少人工检查：
-
-- [ ] 打开页面无报错（F12 控制台干净）
-- [ ] 房间能正常显示、宠物能走动，**不会被卡住**
-- [ ] 你改的功能在 6 套主题下都正常（🎨 界面风格逐个切一遍）
-- [ ] 地牢（🎮）能进能出，`Esc` 和「关闭」都能退出，帧循环没有定格
-- [ ] 刷新页面后存档还在、数值正常（存档坏了是最高优先级的 bug）
-- [ ] 顺手确认宠物栏、抽卡、商店、积分这些**没被你的改动影响**
-
-## 五、打安装包（只有维护者需要）
-
-```powershell
-powershell -NoProfile -ExecutionPolicy Bypass -File packaging\build.ps1 -GamePath "宠物养成游戏.html"
-powershell -NoProfile -ExecutionPolicy Bypass -File packaging\deliver.ps1
-```
-
-产物会同步到 `release\`（安装包 / 绿色版 zip / 单文件 / 说明），然后把 `release\` 一起提交即可。
-
----
-
-## 六、几点提醒
-
-- 游戏本体是**一个很大的单文件**，两个人同时改容易冲突。建议：**一次 PR 只做一件事**，改动尽量集中；冲突了用 `git rebase origin/main` 解决，或直接在 PR 里喊维护者帮忙
-- 涉及宠物名字/角色的新增内容，请保持原创像素画，不要直接搬官方素材
-- 有想法但不打算写代码也欢迎 → 开个 [Issue](https://github.com/Eimgoueim/BaogooseGames/issues) 描述你想要的玩法/数值调整
-- 大家友善交流，不欢迎针对个人、角色或群体的攻击性内容
+欢迎通过 [Issue](https://github.com/Eimgoueim/BaogooseGames/issues) 提出玩法想法。涉及宠物和角色的新内容保持原创美术，友善交流。

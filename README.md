@@ -1,11 +1,8 @@
 # 🐾 Baogoose Games · 包鹅养成
 
-> **Godot 迁移状态：原生游戏已接入主要玩法。** 养成、商店、抽卡、地牢、音频和存档已接入，可打开 `godot/project.godot` 按 F5 游玩；原 HTML 保留为对照和现有发布入口。全 UI 跨引擎视觉仍需最终人工验收。详见 [迁移状态](docs/GODOT_MIGRATION.md) 和 [启动说明](godot/README.md)。
+> **开发主线已切换到 Godot。** 后续功能、修复和维护均在 `godot/` 中进行。原 HTML 与旧发布包保留作历史参考，不再作为新功能开发入口。详见 [Godot 启动说明](godot/README.md) 和 [迁移记录](docs/GODOT_MIGRATION.md)。
 
-一个 **单文件 HTML** 的中国风 / Blue Archive 风格宠物养成小游戏：像素房间 + 抽卡 + 多宠同养 + 肉鸽地牢。
-不需要服务器、不需要安装任何依赖，双击 `宠物养成游戏.html` 就能玩，**完全离线**。
-
-![单文件](https://img.shields.io/badge/single--file-HTML-4fc9a8) ![无依赖](https://img.shields.io/badge/dependencies-0-8b7bff) ![平台](https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%7C%20Linux-ffb340)
+一个使用 **Godot 4.7.2** 的中国风 / Blue Archive 风格宠物养成小游戏：像素房间 + 抽卡 + 多宠同养 + 肉鸽地牢。游戏可离线运行，美术沿用原创像素画，音频实时合成。
 
 ---
 
@@ -19,7 +16,7 @@
 | 🏆 积分兑换 · 🛒 商店 | 玩地牢/互动攒积分，兑换道具、饰品、装饰与称号 |
 | 🎨 界面风格 | 6 套主题（樱花/海洋/森林/陶土/薄荷/夜），会一起存进存档 |
 | 🛋️ 家具摆放 | 家具与饰品可自己拖动摆放位置、缩放（10 种家具 + 饰品佩戴 4 个部位） |
-| 💾 存档 | localStorage 自动保存，支持导出/导入 JSON、下载备份 |
+| 💾 存档 | 原生文件自动保存及备份，支持导出/导入 JSON、下载备份 |
 
 ### 🎲 肉鸽地牢「宠物地牢」（参考《以撒的结合》）
 
@@ -42,67 +39,38 @@
 
 ## 🚀 怎么玩
 
-**方式一：下载 Release 里的安装包**（推荐）
+1. 安装 Godot 4.7.2。
+2. 导入 `godot/project.godot`。
+3. 按 **F5** 启动游戏。
 
-1. 下载 `release/宠物养成游戏_安装包.exe`
-2. 双击安装（会装到当前用户目录并创建开始菜单/桌面快捷方式）
-3. 卸载：开始菜单里的「卸载宠物养成游戏」
+从仓库根目录也可以运行 `godot --path godot`。本机可执行文件位于 `D:/godot/Godot_v4.7.2-stable_win64_console.exe`。
 
-**方式二：绿色免安装**
+普通运行自动保存到 `user://godot-ui/save.json`，保留备份。旧浏览器存档请先从 HTML 存档面板导出 JSON，再在 Godot 存档面板导入。
 
-下载 `release/宠物养成游戏_绿色免安装版.zip`，解压后双击 `启动游戏.cmd`。
+## 📦 发布与历史版本
 
-**方式三：直接用源码**
-
-双击根目录的 `宠物养成游戏.html` 即可（需要现代浏览器，推荐 Edge / Chrome）。
-
----
-
-## 🛠️ 从源码构建安装包
-
-只有 Windows 需要，依赖：**PowerShell 5.1**（系统自带）+ `iexpress.exe`（系统自带）+ 可选 Python（用来生成图标）。
-
-```powershell
-# 1) 生成安装包与便携版到 packaging\out\
-powershell -NoProfile -ExecutionPolicy Bypass -File packaging\build.ps1 `
-  -GamePath "宠物养成游戏.html"
-
-# 2) 同步到 release\（安装包 / 绿色版 zip / 单文件 / 说明）
-powershell -NoProfile -ExecutionPolicy Bypass -File packaging\deliver.ps1
-```
-
-打包流程：`iexpress.exe` 生成自解压安装包（`install.ps1` 负责复制文件 + 建快捷方式 + 注册卸载项）。
-
-```
-packaging/
-├─ build.ps1        # 复制游戏 HTML → 生成图标 → 写 IExpress .sed → 打包 exe → 便携版
-├─ deliver.ps1      # 把产物同步到 release\ 并校验 SHA256
-├─ make_icon.py     # 生成 PetGame.ico（纯 Python，无第三方库）
-└─ src/             # 安装器模板：install/uninstall 脚本、启动 cmd、说明、图标
-```
+后续发布使用 Godot 导出流程。当前尚未生成新的 Godot 安装包；`release/` 中现有安装包、绿色版与 `packaging/` 脚本属于旧 HTML 版本，保留作历史参考。
 
 ---
 
 ## 📁 目录结构
 
+```text
+BaogooseGames/
+├─ godot/                   # 当前游戏与后续开发主线
+│  ├─ project.godot         # Godot 工程入口
+│  ├─ scenes/               # 原生场景
+│  ├─ scripts/              # 玩法、界面、渲染与音频
+│  ├─ data/                 # 游戏配置和对照数据
+│  └─ tests/                # 自动化验证
+├─ tools/                   # 历史版本数据与行为对照工具
+├─ docs/                    # 迁移与开发记录
+├─ 宠物养成游戏.html          # 历史版本、存档迁移与回归参考
+├─ release/                 # 旧 HTML 发布产物
+└─ packaging/               # 旧 HTML 打包工具
 ```
-baogoose_game/
-├─ 宠物养成游戏.html        # 🎮 游戏本体：单文件，所有 HTML/CSS/JS 都在里面
-├─ release/                 # 📦 构建产物（安装包 / 绿色版 / 单文件 / 使用说明）
-├─ packaging/               # 🛠️ Windows 打包脚本与安装器模板
-└─ README.md
-```
 
-游戏本体约 **240 KB**，零外部依赖：所有像素画都是代码里用矩形画出来的，音频用 Web Audio 现场合成，
-没有任何官方素材，可以放心分发。
-
----
-
-## 📝 说明
-
-- 目标浏览器：Edge / Chrome / Firefox 等现代浏览器（用到 Canvas 2D、Web Audio、localStorage）
-- 存档在浏览器 `localStorage`（键名 `dsh-pet-game-v2`），换浏览器/清缓存会丢，建议在游戏内「💾 存档」页导出备份
-- 游戏内的宠物名称致敬 Blue Archive 角色，但**美术全部为原创像素画**，与官方无关
+游戏内的宠物名称致敬 Blue Archive 角色，美术全部为原创像素画，与官方无关。
 
 ---
 
@@ -113,7 +81,7 @@ baogoose_game/
 ```bash
 git clone https://github.com/Eimgoueim/BaogooseGames.git
 cd BaogooseGames
-# 直接用浏览器打开 宠物养成游戏.html 就能玩，改完刷新页面即可
+# 用 Godot 导入 godot/project.godot，按 F5 运行
 ```
 
 - 详细的贡献流程、代码约定、自测清单见 **[CONTRIBUTING.md](CONTRIBUTING.md)**
