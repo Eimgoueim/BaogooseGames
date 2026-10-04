@@ -63,11 +63,13 @@ var summary: Label
 var stage: Control
 var results_scroll: ScrollContainer
 var tip: Label
+var results_grid: GridContainer
 
 func _ready() -> void:
 	mouse_filter = Control.MOUSE_FILTER_STOP
 	set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	visible = false
+	get_viewport().size_changed.connect(_on_viewport_size_changed)
 
 func close() -> void:
 	generation += 1
@@ -113,6 +115,7 @@ func show_results(current: Dictionary, data: Dictionary, drawings: Dictionary, i
 	results_scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
 	body.add_child(results_scroll); results_scroll.visible = false
 	var grid := GridContainer.new()
+	results_grid = grid
 	grid.columns = 3 if get_viewport_rect().size.x <= 540 else 5
 	grid.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	grid.add_theme_constant_override("h_separation", 8); grid.add_theme_constant_override("v_separation", 8)
@@ -189,6 +192,18 @@ func reveal() -> void:
 	tip.text = "限定宠物 %s%% · 第 %d 抽 · 保底进度 %d/%d（%d 抽必出限定，%d%% 歪星野；%d 抽必出当期限定）" % [str(float(c.PET_RATE) * 100).trim_suffix(".0"), int(state.pulls), int(state.pity), int(c.PITY_SMALL), int(c.PITY_SMALL), int(c.SPOOK_AT_PITY * 100), int(c.PITY_BIG)]
 	await get_tree().process_frame
 	if not visible or rolling: return
-	var grid := results_scroll.get_child(0) as GridContainer
-	results_scroll.custom_minimum_size.y = minf(grid.get_combined_minimum_size().y, get_viewport_rect().size.y * 0.54)
-	panel.reset_size()
+	_update_layout()
+
+func _on_viewport_size_changed() -> void:
+	if visible:
+		_update_layout()
+
+func _update_layout() -> void:
+	if not is_instance_valid(panel) or not is_instance_valid(results_scroll) or not is_instance_valid(results_grid):
+		return
+	var viewport_size := get_viewport_rect().size
+	panel.custom_minimum_size.x = minf(580.0, viewport_size.x * 0.96)
+	results_grid.columns = 3 if viewport_size.x <= 540.0 else 5
+	results_scroll.custom_minimum_size.y = minf(results_grid.get_combined_minimum_size().y, viewport_size.y * 0.54)
+	if not rolling:
+		panel.reset_size()

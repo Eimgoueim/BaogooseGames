@@ -14,6 +14,8 @@
 
 首次启动赠送原版 1000 信用点并打开领养面板。上方图标进入商店、背包、佩饰、房间、抽卡、积分、存档和主题；下方图标执行互动或进入地牢。地牢使用 WASD 移动、方向键/IJKL 或鼠标射击，也支持手柄；关闭返回房间。
 
+UI 以 1120×960 为参考，在大窗口和全屏中等比放大字体与控件，宽屏扩展可见区域。小窗口保持 1:1 并使用窄屏布局；切换尺寸保留弹窗输入和抽卡进度。文字按实际分辨率绘制，房间像素画布保持最近邻采样。
+
 `-- --preview` 使用临时状态，不读写正式存档。`-- --save="D:/saves/legacy.json"` 只读加载指定 JSON。普通运行使用 `user://godot-ui/save.json`，保留备份。原浏览器存档不会自动同步：先在 HTML 存档面板导出 JSON，再在 Godot 存档面板导入。
 
 ## 架构和对照
@@ -49,6 +51,8 @@ godot --headless --path godot --script res://tests/test_full_game.gd
 ```powershell
 godot --path godot --script res://tests/test_pixels.gd -- --native
 godot --path godot --script res://tests/render_fixture.gd -- --ui --action=games
+godot --path godot --script res://tests/test_ui_scaling.gd
+godot --path godot --script res://tests/render_fixture.gd -- --ui --resolution=2560x1600 --action=rename
 godot --path godot --script res://tests/render_fixture.gd -- --ui --action=pull:1 --wait=1.6
 ```
 

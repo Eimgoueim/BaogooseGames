@@ -39,11 +39,15 @@ var _panel: PanelContainer
 var _body: VBoxContainer
 var _species_scroll: ScrollContainer
 var _species_grid: GridContainer
+var _modal_scroll: ScrollContainer
+var _theme_grid: GridContainer
+var _save_grid: GridContainer
 
 func _ready() -> void:
 	visible = false
 	set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	mouse_filter = Control.MOUSE_FILTER_STOP
+	get_viewport().size_changed.connect(_on_viewport_size_changed)
 
 func show_modal(kind: String, state: Dictionary, catalog: Dictionary, art: Dictionary) -> void:
 	_active_kind = kind
@@ -103,6 +107,7 @@ func _rebuild() -> void:
 	margin.add_theme_constant_override("margin_bottom", 14)
 	_panel.add_child(margin)
 	var scroll := ScrollContainer.new()
+	_modal_scroll = scroll
 	var viewport_height := get_viewport_rect().size.y
 	scroll.custom_minimum_size = Vector2(0, 1)
 	scroll.size_flags_horizontal = Control.SIZE_EXPAND_FILL
@@ -165,9 +170,15 @@ func _rebuild_dialog(opts: Dictionary) -> void:
 	margin.add_theme_constant_override("margin_top", 14)
 	margin.add_theme_constant_override("margin_bottom", 14)
 	_panel.add_child(margin)
+	var dialog_scroll := ScrollContainer.new()
+	_modal_scroll = dialog_scroll
+	dialog_scroll.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	dialog_scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+	margin.add_child(dialog_scroll)
 	_body = VBoxContainer.new()
+	_body.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	_body.add_theme_constant_override("separation", 10)
-	margin.add_child(_body)
+	dialog_scroll.add_child(_body)
 	_body.add_child(UIStyle.label(str(opts.get("title", "提示")), 16, _ink()))
 	var body_label: Label = UIStyle.label(str(opts.get("body", "")), 14, _ink())
 	body_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
@@ -190,6 +201,7 @@ func _rebuild_dialog(opts: Dictionary) -> void:
 	var confirm := _button(str(opts.get("confirmText", "知道了")), "dlgok")
 	_style_dialog_button(confirm, true)
 	actions.add_child(confirm)
+	call_deferred("_fit_dialog_after_layout", dialog_scroll, _body)
 
 func _style_dialog_button(button: Button, primary: bool) -> void:
 	var fill := Color(1.0, 1.0, 1.0, 0.34)
@@ -249,6 +261,7 @@ func _build_theme() -> void:
 	var current_accent := str(_current_state.get("accent", ""))
 	_add_header("🎨 界面风格", _theme_hint(current_theme, current_accent), _color_var("--purple", "#8b7bff"))
 	var grid := GridContainer.new()
+	_theme_grid = grid
 	grid.columns = 2 if get_viewport_rect().size.x <= 480.0 else 3
 	grid.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	grid.add_theme_constant_override("h_separation", 8)
@@ -389,6 +402,7 @@ func _build_save() -> void:
 	var saved_at := _save_time_text()
 	_add_header("💾 存档", saved_at + " · %d/10 只宠物" % pets.size())
 	var row := GridContainer.new()
+	_save_grid = row
 	row.columns = 2
 	row.add_theme_constant_override("h_separation", 8)
 	row.add_theme_constant_override("v_separation", 8)
@@ -536,6 +550,38 @@ func _fit_modal_after_layout(scroll: ScrollContainer, body: VBoxContainer, viewp
 		_species_scroll.custom_minimum_size.y = minf(_species_grid.get_combined_minimum_size().y, viewport_height * 0.44) if is_instance_valid(_species_grid) and is_instance_valid(_species_scroll) else 0.0
 	var natural_height := body.get_combined_minimum_size().y
 	scroll.custom_minimum_size.y = minf(maxf(120.0, natural_height), viewport_height * 0.88)
+	_apply_modal_size()
+
+func _fit_dialog_after_layout(scroll: ScrollContainer, body: VBoxContainer) -> void:
+	await get_tree().process_frame
+	if not is_instance_valid(scroll) or not is_instance_valid(body):
+		return
+	scroll.custom_minimum_size.y = minf(maxf(120.0, body.get_combined_minimum_size().y), get_viewport_rect().size.y * 0.88)
+	_apply_modal_size()
+
+func _on_viewport_size_changed() -> void:
+	if not visible:
+		return
+	_apply_modal_size()
+	if is_instance_valid(_theme_grid):
+		_theme_grid.columns = 2 if get_viewport_rect().size.x <= 480.0 else 3
+	if is_instance_valid(_species_grid):
+		var inner_width := minf(580.0, get_viewport_rect().size.x * 0.96) - 32.0
+		_species_grid.columns = maxi(1, int(floor((inner_width + 8.0) / 158.0)))
+	if is_instance_valid(_save_grid):
+		_save_grid.columns = 1 if get_viewport_rect().size.x < 420.0 else 2
+	if is_instance_valid(_modal_scroll) and is_instance_valid(_body):
+		if is_instance_valid(_species_scroll) and is_instance_valid(_species_grid):
+			_species_scroll.custom_minimum_size.y = minf(_species_grid.get_combined_minimum_size().y, get_viewport_rect().size.y * 0.44)
+		_modal_scroll.custom_minimum_size.y = minf(maxf(120.0, _body.get_combined_minimum_size().y), get_viewport_rect().size.y * 0.88)
+
+func _apply_modal_size() -> void:
+	if not is_instance_valid(_panel):
+		return
+	var viewport_size := get_viewport_rect().size
+	var max_width := 580.0 if _active_kind != "dialog" else 430.0
+	var margin := 0.96 if _active_kind != "dialog" else 0.94
+	_panel.custom_minimum_size.x = minf(max_width, viewport_size.x * margin)
 
 func _ink() -> Color:
 	return _color_var("--ink", "#2c2b3d")
@@ -561,3 +607,6 @@ func _clear_children() -> void:
 	_body = null
 	_species_scroll = null
 	_species_grid = null
+	_modal_scroll = null
+	_theme_grid = null
+	_save_grid = null

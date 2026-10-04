@@ -17,6 +17,7 @@ const Results = preload("res://scripts/ui/gacha_results.gd")
 const Feedback = preload("res://scripts/ui/room_feedback.gd")
 const Audio = preload("res://scripts/legacy_audio.gd")
 const Dungeon = preload("res://scripts/dungeon.gd")
+const UI_REFERENCE_SIZE := Vector2i(1120, 960)
 
 var game := Gameplay.new()
 var gacha := Gacha.new()
@@ -58,6 +59,8 @@ var toast_layer: VBoxContainer
 var download_dialog: FileDialog
 
 func _ready() -> void:
+	_sync_ui_scale()
+	get_window().size_changed.connect(_sync_ui_scale)
 	catalog = Catalog.load_catalog()
 	art = Catalog.read_json("res://data/art.json")
 	repository.path = "user://godot-ui/save.json"
@@ -133,6 +136,14 @@ func _ready() -> void:
 	if not preview_mode and not state.get("picked", false): open_modal("adopt")
 	refresh_ui()
 	print("Godot 原生游戏已启动。")
+
+func _sync_ui_scale() -> void:
+	# 大窗口统一缩放原生文字和控件；小窗口保持 1:1，继续使用窄屏布局。
+	# canvas_items 让字体按实际分辨率绘制，房间独立的像素画布仍使用最近邻采样。
+	var window := get_window()
+	var reference := Vector2i(mini(window.size.x, UI_REFERENCE_SIZE.x), mini(window.size.y, UI_REFERENCE_SIZE.y))
+	if window.content_scale_size != reference:
+		window.content_scale_size = reference
 
 func consume_events(events: Array) -> void:
 	var changed := false

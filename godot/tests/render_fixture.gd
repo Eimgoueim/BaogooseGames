@@ -7,6 +7,10 @@ func _initialize() -> void:
 	call_deferred("capture")
 
 func capture() -> void:
+	for argument in OS.get_cmdline_user_args():
+		if argument.begins_with("--resolution="):
+			var dimensions := argument.trim_prefix("--resolution=").split("x")
+			root.size = Vector2i(int(dimensions[0]), int(dimensions[1]))
 	var native := "--ui" in OS.get_cmdline_user_args()
 	var scene: Control = load("res://scenes/native_room.tscn").instantiate() if native else Scene.instantiate()
 	if native: scene.set("preview_mode", true)
@@ -16,6 +20,9 @@ func capture() -> void:
 		for argument in OS.get_cmdline_user_args():
 			if argument.begins_with("--action="): scene.handle(argument.trim_prefix("--action="))
 			if argument.begins_with("--wait="): await create_timer(float(argument.trim_prefix("--wait="))).timeout
+	await process_frame
+	await process_frame
+	# 让依赖容器最小尺寸的弹窗完成延迟布局。
 	await process_frame
 	await process_frame
 	await RenderingServer.frame_post_draw
