@@ -43,7 +43,7 @@ func _unit(battle: Variant, side: String, index := 0) -> Dictionary:
 	return result[index] if index < result.size() else {}
 
 func _soldier(id: int, side: String, cell: Vector2i) -> Dictionary:
-	return {"id":id,"kind":"soldier","side":side,"cell":cell,"name":"前线兵","hp":12,"max_hp":12,"move":2,"sight":4,"range":1,"damage":3,"guard":false,"pet_index":-1}
+	return {"id":id,"kind":"soldier","side":side,"cell":cell,"name":"前线兵","hp":12,"max_hp":12,"move":BattleState.SOLDIER_MOVE,"sight":BattleState.SOLDIER_SIGHT,"range":1,"damage":3,"guard":false,"pet_index":-1}
 
 func _enemy_until_ally(battle: Variant) -> void:
 	var guard := 0
@@ -87,7 +87,7 @@ func _test_initial_frontline() -> void:
 	for soldier: Dictionary in enemy_soldiers: actual_enemy.append(soldier.cell)
 	_check(actual_ally == expected_ally and actual_enemy == expected_enemy, "小兵出生位置应匹配两侧镜像前线")
 	for soldier: Dictionary in ally_soldiers + enemy_soldiers:
-		_check(soldier.hp == 12 and soldier.damage == 3 and soldier.move == 2, "初始前线小兵应使用标准生命、伤害和移动参数")
+		_check(soldier.hp == 12 and soldier.damage == 3 and soldier.move == 1 and soldier.sight == 2, "初始前线小兵应使用标准生命、伤害、移动和视野参数")
 	var cells := {}
 	var ids := {}
 	for unit: Dictionary in battle.units:

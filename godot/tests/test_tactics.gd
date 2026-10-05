@@ -55,7 +55,7 @@ func _put(unit: Dictionary, cell: Vector2i) -> void:
 	unit.cell = cell
 
 func _soldier(id: int, side: String, cell: Vector2i) -> Dictionary:
-	return {"id":id, "kind":"soldier", "side":side, "cell":cell, "name":"测试兵", "species":"goose", "level":1, "hp":12, "max_hp":12, "move":2, "sight":4, "range":1, "damage":3, "guard":false, "pet_index":-1}
+	return {"id":id, "kind":"soldier", "side":side, "cell":cell, "name":"测试兵", "species":"goose", "level":1, "hp":12, "max_hp":12, "move":BattleState.SOLDIER_MOVE, "sight":BattleState.SOLDIER_SIGHT, "range":1, "damage":3, "guard":false, "pet_index":-1}
 
 func _hold_enemy_pets(battle: Variant) -> void:
 	battle.deploy_budget.enemy = 0
@@ -350,7 +350,7 @@ func _test_regions_and_scoring() -> void:
 	_check(empty_enemy_region.owner == "enemy", "无单位区域应保留此前owner")
 	_check(battle.score_ally >= 1 and battle.score_enemy >= 1, "每个完整双方回合应按区域owner结算得分")
 	_check(battle.action_points.ally == BattleState.TURN_AP and battle.action_points.enemy == BattleState.TURN_AP, "完整轮结算后双方共享行动点一起重置")
-	_check(battle.deploy_budget.ally == 2 and battle.deploy_budget.enemy == 1, "新轮增加部署预算后敌方已用掉的名额相抵")
+	_check(battle.deploy_budget.ally == 2 and battle.deploy_budget.enemy == 2, "新轮双方各有两个所属区域，部署名额均重置为2")
 
 	var contest := _new_battle(2)
 	_ground(contest); _hold_enemy_pets(contest)
@@ -425,7 +425,7 @@ func _test_deployment_and_soldiers() -> void:
 	_check(deploy.get("ok", false) and battle.deploy_budget.ally == 0, "成功部署应消耗一个己方预算")
 	_check(battle.action_points.ally == before_ap and not battle.has_pending_reactions(), "手动部署不消耗宠物行动点，也不触发响应")
 	var soldier: Dictionary = battle.get_unit(int(deploy.id))
-	_check(soldier.kind == "soldier" and soldier.hp == 12 and soldier.damage == 3 and soldier.move == 2 and soldier.sight == 4 and soldier.range == 1, "小兵参数应匹配规定数值")
+	_check(soldier.kind == "soldier" and soldier.hp == 12 and soldier.damage == 3 and soldier.move == 1 and soldier.sight == 2 and soldier.range == 1, "小兵参数应匹配规定数值")
 	soldier.sight = 0
 	battle.refresh_visibility()
 	_check(battle.reachable_cells(int(soldier.id)).is_empty(), "小兵不能进入宠物的移动指令")
@@ -454,7 +454,9 @@ func _test_deployment_and_soldiers() -> void:
 	var enemy_count_after := _side_units(battle, "enemy").filter(func(unit: Dictionary): return unit.kind == "soldier").size()
 	_check(enemy_count_after == enemy_count_before + 1 and battle.deploy_budget.enemy == 0, "敌方自动部署应消耗一个预算")
 	_finish_enemy_phase(battle)
-	_check(battle.deploy_budget.ally == 1 and battle.deploy_budget.enemy == 1, "完整新回合应补充双方部署预算")
+	var ally_regions: int = battle.regions.filter(func(region: Dictionary): return region.owner == "ally").size()
+	var enemy_regions: int = battle.regions.filter(func(region: Dictionary): return region.owner == "enemy").size()
+	_check(battle.deploy_budget.ally == ally_regions and battle.deploy_budget.enemy == enemy_regions, "完整新回合应按双方所属区域数重置部署名额")
 
 func _test_reactions() -> void:
 	# 小兵响应一次、无AP递归并在处理期间锁定宠物操作。

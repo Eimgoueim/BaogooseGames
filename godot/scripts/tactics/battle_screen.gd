@@ -138,7 +138,7 @@ func _build() -> void:
 	_end_button.tooltip_text = "放弃本轮剩余指令；对方结束后统一结算区域与补给"
 	var fit := _button("查看全图", func() -> void: board.fit_board()); column.add_child(fit)
 	_territories = _label("", 12); column.add_child(_territories)
-	var help := _label("左键选择／操作 · Tab 切换宠物\n右键或中键拖地图 · 滚轮缩放\n双方交替：一次宠物指令后交给对方\n每方每轮共享 %d 点，换手不回满\n普通格 1、灌木 2；防御 %d 点，减伤 3\n点释放技能，再选技能和可见敌人\n普通技能命中加 1 格，各宠物独立充能\n满 %d 格可用大招，充能跨轮保留\n指令后先由对方小兵各响应一次\n开局已有兵线，小兵也参与夺区\n增援不耗点，可放在稳定控制区前方\n结束本轮放弃余点，双方结束后结算\n每区每轮 1 分，达到 %d 分并领先获胜\n消灭对方全部宠物也可获胜" % [Battle.TURN_AP, Battle.DEFEND_COST, Skills.CHARGE_MAX, Battle.TARGET_SCORE], 12); column.add_child(help)
+	var help := _label("左键选择／操作 · Tab 切换宠物\n右键或中键拖地图 · 滚轮缩放\n双方交替：一次宠物指令后交给对方\n每方每轮共享 %d 点，换手不回满\n普通格 1、灌木 2；防御 %d 点，减伤 3\n点释放技能，再选技能和可见敌人\n普通技能命中加 1 格，各宠物独立充能\n满 %d 格可用大招，充能跨轮保留\n指令后先由对方小兵各响应一次\n小兵每次走 %d 格，视野 %d 格，也能夺区\n每控制一区，每轮可增援一名，不累积\n增援不耗点，可放在稳定控制区前方\n结束本轮放弃余点，双方结束后结算\n每区每轮 1 分，达到 %d 分并领先获胜\n消灭对方全部宠物也可获胜" % [Battle.TURN_AP, Battle.DEFEND_COST, Skills.CHARGE_MAX, Battle.SOLDIER_MOVE, Battle.SOLDIER_SIGHT, Battle.TARGET_SCORE], 12); column.add_child(help)
 	_roster_panel = _panel(); _content.add_child(_roster_panel)
 	var setup_scroll := ScrollContainer.new(); setup_scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
 	_roster_panel.add_child(setup_scroll)
@@ -148,7 +148,7 @@ func _build() -> void:
 	_roster_scroll = ScrollContainer.new(); _roster_scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
 	_roster_body.add_child(_roster_scroll)
 	_start_button = _button("开始对战", start_battle, true); _roster_body.add_child(_start_button)
-	_roster_body.add_child(_label("开局双方各有 %d 名小兵在前方，宠物从后排展开。双方轮流下一个宠物指令；对方小兵响应后，交出指令权。\n每方每轮共享 %d 行动点；双方都结束后才回满、结算区域并各增加 1 个增援名额，下一轮交换先手。控制前方区域可以就近增援。\n每只宠物有两招普通技能和一招充能大招，目前使用相同占位技能。普通技能命中积攒充能，满 %d 格可释放大招。\n区域内单方单位驻守则获得控制；双方同在则争夺中、不产分，也不能增援。小兵也能夺区。\n未知地形和视野外敌人隐藏，区域显示己方已知归属。\n胜利奖励：60 信用点 · 10 积分 · 20 玩家经验" % [Battle.Map.ALLY_FRONTLINE_SPAWNS.size(), Battle.TURN_AP, Skills.CHARGE_MAX], 12))
+	_roster_body.add_child(_label("开局双方各有 %d 名小兵在前方，宠物从后排展开。双方轮流下一个宠物指令；对方小兵响应后，交出指令权。\n每方每轮共享 %d 行动点；双方都结束后才回满、结算区域，并按各自区域数重置增援名额，不累积。下一轮交换先手，控制前方区域可以就近增援。\n小兵每次最多移动一格，自身视野两格。每只宠物有两招普通技能和一招充能大招，目前使用相同占位技能。普通技能命中积攒充能，满 %d 格可释放大招。\n区域内单方单位驻守则获得控制；双方同在则争夺中、不产分，也不能在该区增援。小兵也能夺区。\n未知地形和视野外敌人隐藏，区域显示己方已知归属。\n胜利奖励：60 信用点 · 10 积分 · 20 玩家经验" % [Battle.Map.ALLY_FRONTLINE_SPAWNS.size(), Battle.TURN_AP, Skills.CHARGE_MAX], 12))
 	board.visible = false; _sidebar.visible = false
 
 func _refresh_roster() -> void:

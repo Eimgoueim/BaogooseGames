@@ -7,8 +7,8 @@ const TURN_AP := 24
 const DEFEND_COST := 2
 const SOLDIER_HEALTH := 12
 const SOLDIER_DAMAGE := 3
-const SOLDIER_MOVE := 2
-const SOLDIER_SIGHT := 4
+const SOLDIER_MOVE := 1
+const SOLDIER_SIGHT := 2
 const VICTORY_CREDITS := 60
 const VICTORY_POINTS := 10
 const VICTORY_EXPERIENCE := 20
@@ -33,7 +33,7 @@ var enemy_explored_cells: Dictionary = {}
 var enemy_memory: Dictionary = {}
 var last_seen_enemies: Dictionary = {}
 var action_points := {"ally": TURN_AP, "enemy": TURN_AP}
-var deploy_budget := {"ally": 1, "enemy": 1}
+var deploy_budget := {"ally": 0, "enemy": 0}
 var round_done := {"ally": false, "enemy": false}
 var round_starter := "ally"
 var phase := "player"
@@ -55,7 +55,7 @@ func setup(pets: Array, _catalog: Dictionary) -> void:
 	enemy_memory.clear(); last_seen_enemies.clear()
 	phase = "player"; round_number = 1; score_ally = 0; score_enemy = 0
 	action_points = {"ally": TURN_AP, "enemy": TURN_AP}
-	deploy_budget = {"ally": 1, "enemy": 1}; _next_soldier_id = 1000
+	deploy_budget = {"ally": 0, "enemy": 0}; _next_soldier_id = 1000
 	round_done = {"ally": false, "enemy": false}; round_starter = "ally"
 	_enemy_order.clear(); _enemy_cursor = 0
 	_enemy_deployment_pending = true; _reaction_order.clear(); _handoff_pending = ""
@@ -76,6 +76,7 @@ func setup(pets: Array, _catalog: Dictionary) -> void:
 	for cell in Map.ENEMY_FRONTLINE_SPAWNS: _add_soldier("enemy", cell)
 	region_at(Map.ALLY_SPAWNS[0]).owner = "ally"
 	region_at(Map.ENEMY_SPAWNS[0]).owner = "enemy"
+	_reset_deployment_budget()
 	refresh_visibility()
 
 func _make_unit(id: int, side: String, species: String, unit_name: String, level: int, cell: Vector2i) -> Dictionary:
@@ -138,7 +139,7 @@ func _movement_search(unit: Dictionary, goal := Vector2i(-1, -1), unlimited := f
 			# 未探索区按普通地面规划，避免高亮泄露隐藏地形和敌人。
 			if known.has(next) and not _walkable(next): continue
 			if next != origin and _known_occupied(next, unit.side): continue
-			var cost: int = costs[current] + (2 if known.has(next) and tiles[next] == "brush" else 1)
+			var cost: int = costs[current] + (2 if unit.get("kind", "pet") != "soldier" and known.has(next) and tiles[next] == "brush" else 1)
 			if cost > budget or (costs.has(next) and costs[next] <= cost): continue
 			costs[next] = cost; parents[next] = current; pending.append(next)
 	return {"costs": costs, "parents": parents}
@@ -173,7 +174,7 @@ func _walk_path(unit: Dictionary, path: Array[Vector2i], budget: int) -> Diction
 	var walked: Array[Vector2i] = []
 	var spent := 0
 	for next in path:
-		var cost := 2 if tiles.get(next) == "brush" else 1
+		var cost := 2 if unit.get("kind", "pet") != "soldier" and tiles.get(next) == "brush" else 1
 		if not _walkable(next) or not unit_at(next).is_empty() or spent + cost > budget: break
 		unit.cell = next; spent += cost; walked.append(next)
 		refresh_visibility()
@@ -327,6 +328,12 @@ func _add_soldier(side: String, cell: Vector2i) -> Dictionary:
 	var soldier := {"id": _next_soldier_id, "kind": "soldier", "side": side, "cell": cell, "name": "我方小兵" if side == "ally" else "敌方小兵", "species": "goose", "level": 1, "hp": SOLDIER_HEALTH, "max_hp": SOLDIER_HEALTH, "move": SOLDIER_MOVE, "sight": SOLDIER_SIGHT, "range": 1, "damage": SOLDIER_DAMAGE, "guard": false, "pet_index": -1}
 	_next_soldier_id += 1; units.append(soldier)
 	return soldier
+
+func _reset_deployment_budget() -> void:
+	# 每轮额度等于结算后的所属区域数量，未使用名额不跨轮累积。
+	deploy_budget = {"ally": 0, "enemy": 0}
+	for region in regions:
+		if region.owner in ["ally", "enemy"]: deploy_budget[region.owner] += 1
 
 func has_pending_reactions() -> bool:
 	return not _reaction_order.is_empty()
@@ -497,14 +504,18 @@ func _advance_path(unit: Dictionary, goal: Vector2i, budget: int) -> Array[Vecto
 	var cost := 0
 	var path: Array[Vector2i] = []
 	for cell in route:
-		cost += 2 if _known_for(unit.side).has(cell) and tiles[cell] == "brush" else 1
+		# 小兵按格移动，宠物仍按地形消耗行动点。
+		cost += 2 if unit.get("kind", "pet") != "soldier" and _known_for(unit.side).has(cell) and tiles[cell] == "brush" else 1
 		if cost > budget: break
 		path.append(cell)
 	return path
 
 func _soldier_action(unit: Dictionary) -> Dictionary:
 	var seen_before: bool = unit.side == "ally" or visible_cells.has(unit.cell)
-	var targets := _visible_targets(unit)
+	var targets: Array[Dictionary] = []
+	# 阵营仍共享迷雾视野，小兵自动追击只使用自身两格内的可见目标。
+	for target in _visible_targets(unit):
+		if distance(unit.cell, target.cell) <= int(unit.sight) and has_line_of_sight(unit.cell, target.cell): targets.append(target)
 	for target in targets:
 		var attack := _attack_check(unit, target.cell)
 		if attack.ok:
@@ -617,7 +628,7 @@ func _finish_round() -> void:
 		round_starter = "enemy" if round_starter == "ally" else "ally"
 		phase = "player" if round_starter == "ally" else "enemy"
 		_enemy_cursor = 0; _enemy_deployment_pending = true
-		deploy_budget.ally += 1; deploy_budget.enemy += 1
+		_reset_deployment_budget()
 		for unit in units:
 			if unit.hp > 0 and unit.get("kind", "pet") == "pet": unit.guard = false
 	refresh_visibility()
