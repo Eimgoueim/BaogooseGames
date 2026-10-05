@@ -512,10 +512,16 @@ func _bar_set() -> Dictionary:
 		for key in _state.get("inv", {}):
 			var item: Dictionary = _catalog.get("SHOP", {}).get(key, {})
 			if int(_state.inv[key]) <= 0 or item.is_empty(): continue
+			# 佩饰/家具/装饰不是"喂给宠物用"的道具（各有自己的页面：🎀 佩饰 / 🛋️ 房间），
+			# 混在道具栏里点了只会白消耗，所以这里不列
+			if _is_place_or_wear(item): continue
 			if item.get("only", "") != "" and item.only != pet.get("species", ""): continue
 			if item.get("onlyKind", "") == "ai" and not species.get("ai", false): continue
 			keys.append(str(key))
 	return {"kind": kind, "label": label, "act": act, "keys": keys, "empty": empty}
+
+func _is_place_or_wear(item: Dictionary) -> bool:
+	return item.has("wear") or item.has("furn") or item.has("deco")
 
 func _bar_extras(kind: String) -> Array[Dictionary]:
 	var extras: Array[Dictionary] = []

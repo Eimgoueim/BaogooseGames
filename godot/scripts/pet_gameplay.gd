@@ -186,6 +186,15 @@ func _use(key: String) -> void:
 		_toast("这是 AI 型宠物专用道具（" + _ai_names() + "）"); return
 	if p.asleep: _toast("😴 " + p.name + " 睡着了，先叫醒它"); return
 	if int(state.inv.get(key,0)) <= 0: _toast("背包里没有" + item.name + "了"); return
+	if item.has("wear") or item.has("furn") or item.has("deco"):
+		# 这类不是喂给宠物用的：不要白消耗，直接告诉玩家去哪里用
+		if item.has("wear"):
+			_toast("🎀 「" + item.name + "」是佩饰：去「🎀 佩饰」页面点它给宠物戴上")
+		elif item.has("furn"):
+			_toast("🛋️ 「" + item.name + "」是家具：去「🛋️ 房间」页面摆放")
+		else:
+			_toast("🧸 「" + item.name + "」是装饰：去「🛋️ 房间」页面摆放")
+		return
 	var fav := _fav(key,p)
 	var perks: Dictionary = _sp(p).get("perks", {})
 	var mm := float(perks.get("sweetMood",1.4)) if fav else 1.0
