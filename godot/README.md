@@ -14,6 +14,8 @@
 
 首次启动赠送原版 1000 信用点并打开领养面板。上方图标进入商店、背包、佩饰、房间、抽卡、积分、存档和主题；下方图标执行互动或进入地牢。地牢使用 WASD 移动、方向键/IJKL 或鼠标射击，也支持手柄；关闭返回房间。
 
+左下方 **⚔ 宠物战棋** 可用已有宠物组建 1–4 人战队，在 24×24 地图中进行带战争迷雾的回合制据点战。规则、操作与结算见 [宠物战棋说明](../docs/PET_TACTICS.md)。
+
 UI 以 1120×960 为参考，在大窗口和全屏中等比放大字体与控件，宽屏扩展可见区域。小窗口保持 1:1 并使用窄屏布局；切换尺寸保留弹窗输入和抽卡进度。文字按实际分辨率绘制，房间像素画布保持最近邻采样。
 
 界面文字基础字号至少 14px，正文按原字号放大约 25%；宠物栏名字和等级使用 14px，主名字使用 20px。全屏会继续在基础字号上按窗口比例放大。
@@ -46,6 +48,8 @@ godot --headless --path godot --script res://tests/test_legacy_behavior.gd
 godot --headless --path godot --script res://tests/test_dungeon.gd
 godot --headless --path godot --script res://tests/test_audio.gd
 godot --headless --path godot --script res://tests/test_full_game.gd
+godot --headless --path godot --script res://tests/test_tactics.gd
+godot --headless --path godot --script res://tests/test_tactics_ui.gd
 ```
 
 图形验证需要可用 GPU，不能使用 `--headless`：
@@ -54,6 +58,8 @@ godot --headless --path godot --script res://tests/test_full_game.gd
 godot --path godot --script res://tests/test_pixels.gd -- --native
 godot --path godot --script res://tests/render_fixture.gd -- --ui --action=games
 godot --path godot --script res://tests/test_ui_scaling.gd
+godot --path godot --script res://tests/test_tactics_ui.gd
+godot --path godot --script res://tests/render_fixture.gd -- --ui --action=tactics --action=tacticsstart
 godot --path godot --script res://tests/render_fixture.gd -- --ui --resolution=2560x1600 --action=rename
 godot --path godot --script res://tests/render_fixture.gd -- --ui --action=pull:1 --wait=1.6
 ```

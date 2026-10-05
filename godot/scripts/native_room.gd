@@ -17,6 +17,7 @@ const Results = preload("res://scripts/ui/gacha_results.gd")
 const Feedback = preload("res://scripts/ui/room_feedback.gd")
 const Audio = preload("res://scripts/legacy_audio.gd")
 const Dungeon = preload("res://scripts/dungeon.gd")
+const Tactics = preload("res://scripts/tactics/battle_screen.gd")
 const UI_REFERENCE_SIZE := Vector2i(1120, 960)
 
 var game := Gameplay.new()
@@ -25,6 +26,8 @@ var results_ui: Control
 var feedback: Control
 var audio: Node
 var dungeon: Control
+var tactics: Control
+var tactics_button: Button
 var audio_started := false
 var loaded_save := false
 var prior_window_mode := DisplayServer.WINDOW_MODE_WINDOWED
@@ -121,6 +124,14 @@ func _ready() -> void:
 		dungeon_fullscreen = false
 		if audio_started: audio.play_track("home")
 		refresh_ui())
+	tactics = Tactics.new()
+	add_child(tactics)
+	tactics.victory_requested.connect(tactics_reward)
+	tactics.closed.connect(func() -> void:
+		modal_key = ""
+		if audio_started: audio.play_track("home")
+		refresh_ui()
+		save_state())
 	toast_layer = VBoxContainer.new()
 	toast_layer.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	toast_layer.add_theme_constant_override("separation", 8)
@@ -179,6 +190,13 @@ func dungeon_reward(points: int, credits: int, experience: int) -> void:
 	refresh_ui()
 	save_state()
 	if dungeon.ended: audio.play_track("home")
+
+func tactics_reward(points: int, credits: int, experience: int) -> void:
+	game.drain_events()
+	game.gain_points(points, credits, experience)
+	consume_events(game.drain_events())
+	refresh_ui()
+	save_state()
 
 func start_audio() -> void:
 	if audio_started or audio == null: return
@@ -244,6 +262,10 @@ func create_room() -> void:
 	music_button = Style.button("🎵", "bgm", handle, Renderer.theme_vars(state, catalog))
 	music_button.custom_minimum_size = Vector2(30, 30)
 	add_child(music_button)
+	tactics_button = Style.button("⚔ 宠物战棋", "tactics", handle, Renderer.theme_vars(state, catalog))
+	tactics_button.custom_minimum_size = Vector2(126, 34)
+	tactics_button.tooltip_text = "组成宠物战队，在战争迷雾中争夺据点"
+	add_child(tactics_button)
 	download_dialog = FileDialog.new()
 	download_dialog.file_mode = FileDialog.FILE_MODE_SAVE_FILE
 	download_dialog.access = FileDialog.ACCESS_FILESYSTEM
@@ -286,6 +308,7 @@ func refresh_ui() -> void:
 	hint.position = Vector2(size.x * 0.06, size.y - 94)
 	hint.text = "拖动家具摆放 · 滚轮或按钮缩放 · 点空处取消选中" if state.edit else "拖动宠物陪它玩（它会不耐烦）· 点房间抚摸 · 点屏幕上图标用功能"
 	music_button.position = Vector2(10, size.y - 134)
+	tactics_button.position = Vector2(48, size.y - 136)
 	music_button.text = "🎵" if state.bgm else "🔇"
 	if toast_layer != null:
 		var toast_width := minf(520, size.x * 0.88)
@@ -385,6 +408,16 @@ func handle(action: String) -> void:
 				audio.play_track("dungeon")
 				save_state()
 		"rlclose": dungeon.close_game()
+		"tactics":
+			if dungeon.visible: dungeon.close_game()
+			close_panels()
+			tactics.open_game(state, catalog, art)
+			modal_key = "tactics"
+			audio.play_track("home")
+		"tacticsstart":
+			if tactics.visible: tactics.start_battle()
+		"tacticsclose":
+			if tactics.visible: tactics.request_close()
 		"pull":
 			var result: Dictionary = gacha.pull(state, catalog, int(argument))
 			if not result.ok: toast(result.error); return
@@ -552,6 +585,15 @@ func scale_furniture(amount: float) -> void:
 
 func _process(delta: float) -> void:
 	if canvas == null: return
+	if tactics != null and tactics.visible:
+		# 策略思考期间暂停养成；推进时间戳，避免回房间时补算这段时间。
+		var timestamp := int(Time.get_unix_time_from_system() * 1000)
+		var pause_ms := maxi(0, timestamp - game.now_ms)
+		game.now_ms = timestamp
+		state.lastTick = timestamp
+		for pet: Dictionary in state.pets:
+			if int(pet.get("poopNext", 0)) > 0: pet.poopNext += pause_ms
+		return
 	game.bathing = float(visual.get("bath", 0)) > 0
 	consume_events(game.process(int(Time.get_unix_time_from_system() * 1000)))
 	delta = minf(delta, 0.1)
