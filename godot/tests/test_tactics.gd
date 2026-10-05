@@ -154,11 +154,16 @@ func _test_combat_and_visibility() -> void:
 	_put(enemy, Vector2i(6, 5))
 	battle.refresh_visibility()
 	var hp: int = enemy.hp
-	var attack: Dictionary = battle.attack_unit(int(ally.id), enemy.cell)
-	_check(attack.get("ok", false) and enemy.hp < hp, "视野与射程内的敌人应受到攻击")
-	_check(attack.get("cost", -1) == BattleState.ATTACK_COST and battle.action_points.ally == BattleState.TURN_AP - 4, "攻击应从己方共享池扣除4点")
-	var too_far: Dictionary = battle.attack_unit(int(ally.id), Vector2i(20, 20))
-	_check(not too_far.get("ok", false), "超出射程的攻击应拒绝")
+	var pulse_preview: Dictionary = battle.skill_preview(int(ally.id), "pulse", enemy.cell)
+	_check(pulse_preview.get("ok", false) and pulse_preview.hits.size() == 1, "可见且在射程内的敌人应通过单体技能预览")
+	var pulse: Dictionary = battle.cast_skill(int(ally.id), "pulse", enemy.cell)
+	_check(pulse.get("ok", false) and enemy.hp < hp, "成功施放单体技能应伤害敌人")
+	_check(pulse.get("cost", -1) == 4 and battle.action_points.ally == BattleState.TURN_AP - 4, "单体技能应从己方共享池扣除4点")
+	_check(ally.charge == 1, "成功施放普通技能应只增加一格充能")
+	var too_far: Dictionary = battle.skill_preview(int(ally.id), "pulse", Vector2i(20, 20))
+	_check(not too_far.get("ok", false), "超出技能射程的目标应拒绝")
+	var unknown_skill: Dictionary = battle.cast_skill(int(ally.id), "not_learned", enemy.cell)
+	_check(not unknown_skill.get("ok", false) and battle.action_points.ally == BattleState.TURN_AP - 4 and ally.charge == 1, "未学习技能应拒绝且不扣行动点或充能")
 	var defender := _unit(battle, "ally", 1)
 	var defense: Dictionary = battle.defend_unit(int(defender.id))
 	_check(defense.get("ok", false) and defense.get("cost", -1) == BattleState.DEFEND_COST and battle.action_points.ally == BattleState.TURN_AP - 6, "防御应花费共享池2点行动点")
@@ -172,8 +177,8 @@ func _test_combat_and_visibility() -> void:
 	_put(unseen, Vector2i(20, 20))
 	hidden.refresh_visibility()
 	_check(not hidden.visible_cells.has(unseen.cell), "远处敌人应保持隐藏")
-	var hidden_attack: Dictionary = hidden.attack_unit(int(scout.id), unseen.cell)
-	_check(not hidden_attack.get("ok", false), "攻击者不能对非可见敌人发起攻击")
+	var hidden_preview: Dictionary = hidden.skill_preview(int(scout.id), "pulse", unseen.cell)
+	_check(not hidden_preview.get("ok", false), "攻击者不能对非可见敌人施放单体技能")
 	var options: Dictionary = hidden.reachable_cells(int(scout.id))
 	var empty_hidden := _new_battle()
 	_ground(empty_hidden)
@@ -214,8 +219,8 @@ func _test_combat_and_visibility() -> void:
 	line_battle.tiles[Vector2i(6, 5)] = "wall"
 	line_battle.visible_cells[target.cell] = true
 	_check(not line_battle.has_line_of_sight(shooter.cell, target.cell), "墙体应阻断攻击视线")
-	var blocked_attack: Dictionary = line_battle.attack_unit(int(shooter.id), target.cell)
-	_check(not blocked_attack.get("ok", false), "即使目标单元格在视野数据中，墙体遮挡也应阻止攻击")
+	var blocked_attack: Dictionary = line_battle.skill_preview(int(shooter.id), "pulse", target.cell)
+	_check(not blocked_attack.get("ok", false), "即使目标单元格在视野数据中，墙体遮挡也应阻止技能")
 
 func _test_enemy_turn_visibility() -> void:
 	var battle := _new_battle()
@@ -401,7 +406,7 @@ func _test_deployment_and_soldiers() -> void:
 	battle.refresh_visibility()
 	_check(battle.reachable_cells(int(soldier.id)).is_empty(), "小兵不能进入宠物的移动指令")
 	_check(not battle.move_unit(int(soldier.id), deploy_cell + Vector2i.RIGHT).get("ok", false), "小兵不能被玩家直接移动")
-	_check(not battle.attack_unit(int(soldier.id), deploy_cell + Vector2i.RIGHT).get("ok", false), "小兵不能被玩家直接攻击")
+	_check(battle.skill_loadout(int(soldier.id)).is_empty() and not battle.cast_skill(int(soldier.id), "pulse", deploy_cell + Vector2i.RIGHT).get("ok", false), "小兵不能被玩家直接施放技能")
 	_check(not battle.defend_unit(int(soldier.id)).get("ok", false), "小兵不能被玩家直接防御")
 	battle.deploy_budget.ally = 1
 	_check(not battle.deploy_soldier("ally", deploy_cell).get("ok", false), "被占据的格子不能重复部署")
@@ -456,8 +461,8 @@ func _test_reactions() -> void:
 	var target := _unit(battle, "enemy")
 	_put(target, Vector2i(6, 5)); actor.range = 2
 	battle.refresh_visibility()
-	var attack: Dictionary = battle.attack_unit(int(actor.id), target.cell)
-	_check(attack.get("ok", false) and battle.has_pending_reactions(), "宠物攻击成功后也应排入对方小兵响应")
+	var attack: Dictionary = battle.cast_skill(int(actor.id), "pulse", target.cell)
+	_check(attack.get("ok", false) and battle.has_pending_reactions(), "宠物技能成功后也应排入对方小兵响应")
 	var attack_points_ally: int = battle.action_points.ally
 	var attack_points_enemy: int = battle.action_points.enemy
 	var attack_reactions := 0
@@ -508,7 +513,7 @@ func _test_reactions() -> void:
 	enemy_turn.refresh_visibility()
 	_check(enemy_turn.end_player_turn(), "敌方响应场景应进入敌方回合")
 	var enemy_action: Dictionary = enemy_turn.step_enemy()
-	_check(enemy_action.get("action", "") in ["move", "attack", "defend"], "敌宠物应先执行一次行动")
+	_check(enemy_action.get("action", "") in ["move", "skill", "defend"], "敌宠物应先执行一次行动")
 	_check(enemy_turn.has_pending_reactions(), "敌方宠物行动后应排入我方小兵响应")
 	var ally_points_before_response: int = enemy_turn.action_points.ally
 	var enemy_points_before_response: int = enemy_turn.action_points.enemy
@@ -552,7 +557,7 @@ func _test_terminal_input_lock() -> void:
 	var soldier := _soldier(8400, "enemy", ally.cell + Vector2i.DOWN)
 	battle.units.append(soldier)
 	battle.visible_cells[last_pet.cell] = true
-	var victory: Dictionary = battle.attack_unit(int(ally.id), last_pet.cell)
+	var victory: Dictionary = battle.cast_skill(int(ally.id), "pulse", last_pet.cell)
 	_check(victory.get("ok", false) and battle.phase == "won", "击败最后一只敌宠后应获胜，即使敌方还有小兵存活")
 	_check(soldier.hp > 0, "终局宠物全灭场景中的敌方小兵仍存活")
 	_check(not battle.move_unit(int(ally.id), ally.cell + Vector2i(2, 0)).get("ok", false), "终局阶段必须拒绝宠物行动")

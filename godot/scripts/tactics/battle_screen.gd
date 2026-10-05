@@ -4,6 +4,7 @@ signal closed
 signal victory_requested(points: int, credits: int, experience: int)
 
 const Battle = preload("res://scripts/tactics/battle_state.gd")
+const Skills = preload("res://scripts/tactics/skill_catalog.gd")
 const Board = preload("res://scripts/tactics/battle_board.gd")
 const Style = preload("res://scripts/ui/legacy_ui_style.gd")
 const Renderer = preload("res://scripts/room_renderer.gd")
@@ -17,6 +18,7 @@ var vars: Dictionary = {}
 var roster_indices: Array[int] = []
 var selected_id := -1
 var action_mode := "move"
+var selected_skill_id := Skills.BASIC_SKILL
 var started := false
 var settled := false
 var leave_pending := false
@@ -35,7 +37,11 @@ var _squad_buttons: VBoxContainer
 var _squad_scroll: ScrollContainer
 var _end_button: Button
 var _move_button: Button
-var _attack_button: Button
+var _skills_button: Button
+var _skills_panel: VBoxContainer
+var _skill_entries: VBoxContainer
+var _skill_buttons: Dictionary = {}
+var _skill_info: Label
 var _guard_button: Button
 var _deploy_button: Button
 var _territories: Label
@@ -56,6 +62,7 @@ func open_game(current: Dictionary, data: Dictionary, drawings: Dictionary) -> v
 	vars = Renderer.theme_vars(state, catalog)
 	Style.apply(self, vars)
 	started = false; settled = false; leave_pending = false
+	selected_skill_id = Skills.BASIC_SKILL; _skill_buttons.clear()
 	selected_id = -1; roster_indices.clear()
 	for index in state.get("pets", []).size():
 		if roster_indices.size() == 4: break
@@ -104,25 +111,33 @@ func _build() -> void:
 	board.clip_contents = true; _content.add_child(board); board.cell_clicked.connect(_cell_clicked)
 	board.cell_hovered.connect(_cell_hovered)
 	_sidebar = _panel(); _content.add_child(_sidebar)
+	var sidebar_frame := VBoxContainer.new(); _sidebar.add_child(sidebar_frame)
 	_sidebar_scroll = ScrollContainer.new(); _sidebar_scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
-	_sidebar.add_child(_sidebar_scroll)
+	_sidebar_scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	sidebar_frame.add_child(_sidebar_scroll)
 	var column := VBoxContainer.new(); column.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	column.add_theme_constant_override("separation", 8); _sidebar_scroll.add_child(column)
 	_info = _label("", 14); column.add_child(_info)
 	var actions := HBoxContainer.new(); column.add_child(actions)
 	_move_button = _button("移动", func() -> void: _set_mode("move")); actions.add_child(_move_button)
-	_attack_button = _button("攻击 %d" % Battle.ATTACK_COST, func() -> void: _set_mode("attack")); actions.add_child(_attack_button)
+	_skills_button = _button("释放技能", func() -> void: _set_mode("skill")); actions.add_child(_skills_button)
 	_guard_button = _button("防御 %d" % Battle.DEFEND_COST, guard_selected); actions.add_child(_guard_button)
+	_skills_panel = VBoxContainer.new(); column.add_child(_skills_panel)
+	_skill_entries = VBoxContainer.new(); _skills_panel.add_child(_skill_entries)
+	_skill_info = _label("", 12); _skills_panel.add_child(_skill_info)
+	_log = _label("", 12); _log.custom_minimum_size.y = 86
+	_log.max_lines_visible = 4; _log.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
+	_log.mouse_filter = Control.MOUSE_FILTER_PASS
+	column.add_child(_log)
 	_deploy_button = _button("部署小兵", func() -> void: _set_mode("deploy")); column.add_child(_deploy_button)
-	_territories = _label("", 12); column.add_child(_territories)
 	var scroll := ScrollContainer.new(); scroll.custom_minimum_size.y = 160
 	_squad_scroll = scroll
 	scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED; column.add_child(scroll)
 	_squad_buttons = VBoxContainer.new(); _squad_buttons.size_flags_horizontal = Control.SIZE_EXPAND_FILL; scroll.add_child(_squad_buttons)
-	_end_button = _button("结束回合  [空格]", _end_or_restart, true); column.add_child(_end_button)
+	_end_button = _button("结束回合  [空格]", _end_or_restart, true); sidebar_frame.add_child(_end_button)
 	var fit := _button("查看全图", func() -> void: board.fit_board()); column.add_child(fit)
-	_log = _label("", 12); _log.custom_minimum_size.y = 42; column.add_child(_log)
-	var help := _label("左键选择／操作 · Tab 切换宠物\n右键或中键拖地图 · 滚轮缩放\n每方共享 %d 点；普通格 1、灌木 2\n攻击 %d 点；防御 %d 点，减伤 3\n宠物行动后，对方小兵各自动行动一次\n部署不耗点，小兵也参与夺区\n每区每轮 1 分，达到 %d 分并领先获胜\n消灭对方全部宠物也可获胜" % [Battle.TURN_AP, Battle.ATTACK_COST, Battle.DEFEND_COST, Battle.TARGET_SCORE], 12); column.add_child(help)
+	_territories = _label("", 12); column.add_child(_territories)
+	var help := _label("左键选择／操作 · Tab 切换宠物\n右键或中键拖地图 · 滚轮缩放\n每方共享 %d 点；普通格 1、灌木 2\n点释放技能，再选技能和可见敌人\n普通技能命中加 1 格，各宠物独立充能\n满 %d 格可用大招，充能跨回合保留\n防御 %d 点，减伤 3\n宠物移动／施法／防御后，对方小兵响应\n部署不耗点，小兵也参与夺区\n每区每轮 1 分，达到 %d 分并领先获胜\n消灭对方全部宠物也可获胜" % [Battle.TURN_AP, Skills.CHARGE_MAX, Battle.DEFEND_COST, Battle.TARGET_SCORE], 12); column.add_child(help)
 	_roster_panel = _panel(); _content.add_child(_roster_panel)
 	var setup_scroll := ScrollContainer.new(); setup_scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
 	_roster_panel.add_child(setup_scroll)
@@ -132,7 +147,7 @@ func _build() -> void:
 	_roster_scroll = ScrollContainer.new(); _roster_scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
 	_roster_body.add_child(_roster_scroll)
 	_start_button = _button("开始对战", start_battle, true); _roster_body.add_child(_start_button)
-	_roster_body.add_child(_label("地图分为 R1–R9 九个区域。每方每回合共享 %d 行动点，并获得 1 个小兵部署名额。\n完整一轮结束时，只有一方单位的区域归该方控制；双方同在则争夺中、不产分。小兵也能夺区。\n未知地形和视野外的敌人隐藏，区域显示己方已知归属。\n胜利奖励：60 信用点 · 10 积分 · 20 玩家经验" % Battle.TURN_AP, 12))
+	_roster_body.add_child(_label("每只宠物有两招普通技能和一招充能大招，目前使用相同占位技能。普通技能命中积攒充能，满 %d 格可释放大招。\n地图分为 R1–R9 九区，每方每回合共享 %d 行动点，并获得 1 个小兵部署名额。\n完整一轮结束时单方单位驻守的区域归该方控制；双方同在则争夺中、不产分，小兵也能夺区。\n未知地形和视野外敌人隐藏，区域显示己方已知归属。\n胜利奖励：60 信用点 · 10 积分 · 20 玩家经验" % [Skills.CHARGE_MAX, Battle.TURN_AP], 12))
 	board.visible = false; _sidebar.visible = false
 
 func _refresh_roster() -> void:
@@ -169,7 +184,8 @@ func start_battle() -> void:
 	started = true; settled = false; leave_pending = false; _enemy_delay = 0
 	_roster_panel.visible = false; board.visible = true; _sidebar.visible = true
 	selected_id = 0; action_mode = "move"
-	_message = "全队共享 %d 行动点。选择宠物移动，或部署小兵到绿色格。" % Battle.TURN_AP
+	selected_skill_id = Skills.BASIC_SKILL
+	_message = "全队共享 %d 行动点。点释放技能可选择两招普通技和充能大招。" % Battle.TURN_AP
 	_layout(); _refresh_battle()
 	board.fit_board()
 
@@ -222,9 +238,23 @@ func _set_mode(mode: String) -> void:
 	action_mode = mode
 	match mode:
 		"move": _message = "点蓝色格移动，悬停可查看预计点数"
-		"attack": _message = "点视野内且在射程中的敌人攻击，消耗 %d 点" % Battle.ATTACK_COST
+		"skill": _message = "选择技能，再点射程内的可见敌人；悬停可预览范围与伤害"
 		"deploy": _message = "点绿色空格部署小兵：仅限己方控制区域内的可见空地"
 	_refresh_battle()
+
+func _select_skill(skill_id: String) -> void:
+	var unit := battle.get_unit(selected_id)
+	if unit.is_empty() or skill_id not in unit.get("skills", []): return
+	selected_skill_id = skill_id; action_mode = "skill"; leave_pending = false
+	var skill := Skills.definition(skill_id)
+	_message = "%s：选择橙框中的可见敌人作为目标" % skill.name
+	_refresh_battle()
+
+func _skill_report(result: Dictionary) -> String:
+	var summaries: Array[String] = []
+	for hit: Dictionary in result.get("hits", []):
+		summaries.append("%s %d%s" % [hit.name, hit.damage, "（倒下）" if hit.defeated else ""])
+	return "%s · 消耗 %d 点\n%s" % [result.skill_name, result.cost, "、".join(summaries)]
 
 func _cell_clicked(cell: Vector2i) -> void:
 	if not started or battle.phase != "player" or battle.has_pending_reactions(): return
@@ -242,9 +272,9 @@ func _cell_clicked(cell: Vector2i) -> void:
 			_refresh_battle()
 		return
 	var result: Dictionary
-	if action_mode == "attack":
-		result = battle.attack_unit(selected_id, cell)
-		_message = "消耗 %d 点，造成 %d 伤害%s" % [Battle.ATTACK_COST, result.damage, "，敌人倒下" if result.get("defeated", false) else ""] if result.ok else result.error
+	if action_mode == "skill":
+		result = battle.cast_skill(selected_id, selected_skill_id, cell)
+		_message = _skill_report(result) if result.ok else result.error
 	else:
 		board.preview_path = battle.path_to(selected_id, cell)
 		result = battle.move_unit(selected_id, cell)
@@ -254,6 +284,7 @@ func _cell_clicked(cell: Vector2i) -> void:
 
 func _cell_hovered(cell: Vector2i) -> void:
 	if not started or battle.phase != "player" or battle.has_pending_reactions(): return
+	board.skill_area.clear(); board.skill_hit_cells.clear()
 	if action_mode == "move": board.preview_path = battle.path_to(selected_id, cell)
 	else: board.preview_path.clear()
 	_log.text = _message
@@ -265,10 +296,17 @@ func _cell_hovered(cell: Vector2i) -> void:
 	var target := battle.unit_at(cell)
 	if not target.is_empty() and target.side == "enemy" and battle.visible_cells.has(cell):
 		_log.text = "%s · HP %d/%d · 射程 %d · 伤害 %d%s" % [target.name, target.hp, target.max_hp, target.range, target.damage, " · 防御中" if target.guard else ""]
-	if action_mode == "attack":
-		var result := battle.attack_preview(selected_id, cell)
-		if result.ok: _log.text += "\n预计伤害 %d · 消耗 %d 点，点击攻击" % [result.damage, Battle.ATTACK_COST]
+	if action_mode == "skill":
+		var result := battle.skill_preview(selected_id, selected_skill_id, cell)
+		if result.ok:
+			board.skill_area = result.area
+			var hits: Array[String] = []
+			for hit: Dictionary in result.hits:
+				board.skill_hit_cells[hit.cell] = true
+				hits.append("%s %d%s" % [hit.name, hit.damage, "（可击倒）" if hit.defeated else ""])
+			_log.text += "\n%s · 预计伤害：%s · 消耗 %d 点\n橙色为技能范围，仅预览已见敌军" % [result.skill_name, "、".join(hits), result.cost]
 		elif not target.is_empty() and battle.visible_cells.has(cell): _log.text += "\n" + result.error
+	_log.tooltip_text = _log.text
 	board.queue_redraw()
 
 func guard_selected() -> void:
@@ -298,7 +336,8 @@ func _refresh_battle() -> void:
 	_status.text = "第 %d 回合 · %s · 胜利分 我方 %d — 敌方 %d / %d\n共享行动点 我方 %d/%d · 敌方 %d/%d" % [battle.round_number, phase_name, battle.score_ally, battle.score_enemy, Battle.TARGET_SCORE, battle.action_points.ally, Battle.TURN_AP, battle.action_points.enemy, Battle.TURN_AP]
 	var unit := battle.get_unit(selected_id)
 	if not unit.is_empty():
-		_info.text = "%s · HP %d/%d\n视野 %d · 射程 %d · 伤害 %d%s" % [unit.name, unit.hp, unit.max_hp, unit.sight, unit.range, unit.damage, " · 防御中" if unit.guard else ""]
+		_info.text = "%s · HP %d/%d\n视野 %d · 技能射程 %d · 威力 %d%s\n大招充能 %s %d/%d%s" % [unit.name, unit.hp, unit.max_hp, unit.sight, unit.range, unit.damage, " · 防御中" if unit.guard else "", "●".repeat(int(unit.get("charge", 0))) + "○".repeat(maxi(0, Skills.CHARGE_MAX - int(unit.get("charge", 0)))), unit.get("charge", 0), Skills.CHARGE_MAX, " · 就绪" if int(unit.get("charge", 0)) >= Skills.CHARGE_MAX else ""]
+	_refresh_skill_panel(unit)
 	var region_lines: Array[String] = []
 	var owners := {"neutral": "中立", "ally": "我方", "enemy": "敌方"}
 	for region in battle.regions:
@@ -308,19 +347,23 @@ func _refresh_battle() -> void:
 	board.selected_id = selected_id
 	board.reachable = battle.reachable_cells(selected_id) if action_mode == "move" else {}
 	board.deployment_cells = battle.deployment_cells("ally") if action_mode == "deploy" else {}
+	board.skill_targets = battle.skill_targets(selected_id, selected_skill_id) if action_mode == "skill" else {}
+	board.skill_area.clear(); board.skill_hit_cells.clear()
 	board.preview_path.clear(); board.queue_redraw()
 	for child in _squad_buttons.get_children(): _squad_buttons.remove_child(child); child.queue_free()
 	for ally in battle.units:
 		if ally.side != "ally" or ally.get("kind", "pet") != "pet": continue
-		var button := _button("%s · HP %d/%d%s" % [ally.name, ally.hp, ally.max_hp, " ✓" if ally.id == selected_id else ""], select_unit.bind(ally.id, true), ally.id == selected_id)
+		var button := _button("%s · HP %d/%d · 充能 %d/%d%s" % [ally.name, ally.hp, ally.max_hp, ally.get("charge", 0), Skills.CHARGE_MAX, " ✓" if ally.id == selected_id else ""], select_unit.bind(ally.id, true), ally.id == selected_id)
+		button.clip_text = true
+		button.tooltip_text = "%s · HP %d/%d · 大招充能 %d/%d" % [ally.name, ally.hp, ally.max_hp, ally.get("charge", 0), Skills.CHARGE_MAX]
 		button.disabled = ally.hp <= 0; _squad_buttons.add_child(button)
 	_squad_scroll.custom_minimum_size.y = minf(180, _squad_buttons.get_child_count() * 48)
 	var can_act: bool = battle.phase == "player" and not battle.has_pending_reactions() and not unit.is_empty() and unit.hp > 0 and int(battle.action_points.ally) > 0
 	_move_button.disabled = not can_act
-	_attack_button.disabled = not can_act or int(battle.action_points.ally) < Battle.ATTACK_COST
+	_skills_button.disabled = battle.phase != "player" or battle.has_pending_reactions() or unit.is_empty() or unit.hp <= 0
 	_guard_button.disabled = not can_act or int(battle.action_points.ally) < Battle.DEFEND_COST or unit.get("guard", false)
 	_move_button.text = "移动 ✓" if action_mode == "move" else "移动"
-	_attack_button.text = "攻击 %d%s" % [Battle.ATTACK_COST, " ✓" if action_mode == "attack" else ""]
+	_skills_button.text = "释放技能 ✓" if action_mode == "skill" else "释放技能"
 	_deploy_button.text = "部署小兵 · 剩余 %d%s" % [battle.deploy_budget.ally, " ✓" if action_mode == "deploy" else ""]
 	_deploy_button.disabled = battle.phase != "player" or battle.has_pending_reactions() or int(battle.deploy_budget.ally) <= 0
 	_end_button.disabled = battle.phase != "player" or battle.has_pending_reactions()
@@ -331,7 +374,30 @@ func _refresh_battle() -> void:
 			if battle.phase == "won": victory_requested.emit(Battle.VICTORY_POINTS, Battle.VICTORY_CREDITS, Battle.VICTORY_EXPERIENCE)
 		_end_button.disabled = false; _end_button.text = "重新编队"
 	_log.text = _message
+	_log.tooltip_text = _message
 	_exit_button.text = "确认返回" if leave_pending else "返回房间"
+
+func _refresh_skill_panel(unit: Dictionary) -> void:
+	_skills_panel.visible = action_mode == "skill"
+	var loadout := battle.skill_loadout(selected_id)
+	var ids: Array[String] = []
+	for skill in loadout: ids.append(skill.id)
+	if selected_skill_id not in ids and not ids.is_empty(): selected_skill_id = ids[0]
+	if _skill_buttons.keys() != ids:
+		for child in _skill_entries.get_children(): _skill_entries.remove_child(child); child.queue_free()
+		_skill_buttons.clear()
+		for skill in loadout:
+			var button := _button("", _select_skill.bind(skill.id))
+			_skill_buttons[skill.id] = button; _skill_entries.add_child(button)
+	for skill in loadout:
+		var button: Button = _skill_buttons[skill.id]
+		var ready := battle.skill_ready(selected_id, skill.id)
+		button.disabled = not ready.ok
+		button.text = "%s%s · %d 点%s" % ["大招 · " if skill.kind == "ultimate" else "", skill.name, skill.cost, " ✓" if action_mode == "skill" and selected_skill_id == skill.id else ""]
+		button.tooltip_text = skill.description + ("\n" + ready.error if not ready.ok else "")
+	var selected := Skills.definition(selected_skill_id)
+	if selected.is_empty() or unit.is_empty(): _skill_info.text = ""; return
+	_skill_info.text = "%s · 射程 %d · %s\n威力 ×%.2f · %s\n仅伤敌军，墙体遮挡" % [selected.name, int(unit.range) + int(selected.range_bonus), "单体" if int(selected.radius) == 0 else "菱形范围半径 %d" % selected.radius, selected.damage_scale, "消耗 %d 格充能" % Skills.CHARGE_MAX if selected.kind == "ultimate" else "命中充能 +1"]
 
 func _restart_roster() -> void:
 	open_game(state, catalog, art)

@@ -1,9 +1,9 @@
 extends RefCounted
 
 const Map = preload("res://scripts/tactics/battle_map.gd")
+const Skills = preload("res://scripts/tactics/skill_catalog.gd")
 const TARGET_SCORE := 30
 const TURN_AP := 24
-const ATTACK_COST := 4
 const DEFEND_COST := 2
 const SOLDIER_HEALTH := 12
 const SOLDIER_DAMAGE := 3
@@ -77,7 +77,7 @@ func _make_unit(id: int, side: String, species: String, unit_name: String, level
 	var profile: Array = PROFILES.get(species, PROFILES.dragon)
 	var growth := clampi(level - 1, 0, 10)
 	var health: int = int(profile[0]) + growth * 2
-	return {"id": id, "kind": "pet", "side": side, "cell": cell, "name": unit_name, "species": species, "level": level, "hp": health, "max_hp": health, "move": int(profile[1]), "sight": int(profile[2]), "range": int(profile[3]), "damage": int(profile[4]) + growth / 3, "guard": false, "pet_index": -1}
+	return {"id": id, "kind": "pet", "side": side, "cell": cell, "name": unit_name, "species": species, "level": level, "hp": health, "max_hp": health, "move": int(profile[1]), "sight": int(profile[2]), "range": int(profile[3]), "damage": int(profile[4]) + growth / 3, "guard": false, "pet_index": -1, "skills": Skills.loadout_for(species), "charge": 0, "charge_max": Skills.CHARGE_MAX}
 
 func get_unit(id: int) -> Dictionary:
 	for unit in units:
@@ -193,24 +193,104 @@ func _attack_check(unit: Dictionary, target_cell: Vector2i) -> Dictionary:
 	if not has_line_of_sight(unit.cell, target_cell): return {"ok": false, "error": "攻击路线被墙体遮挡"}
 	return {"ok": true, "damage": maxi(1, int(unit.damage) - (3 if target.guard else 0))}
 
-func attack_preview(id: int, target_cell: Vector2i) -> Dictionary:
+func skill_loadout(id: int) -> Array[Dictionary]:
 	var unit := get_unit(id)
-	if not _can_act(unit) or int(action_points[unit.side]) < ATTACK_COST: return {"ok": false, "error": "攻击需要 %d 行动点" % ATTACK_COST}
-	return _attack_check(unit, target_cell)
+	var loadout: Array[Dictionary] = []
+	if unit.is_empty() or unit.get("kind", "pet") != "pet": return loadout
+	for skill_id: String in unit.get("skills", []):
+		var skill := Skills.definition(skill_id)
+		if not skill.is_empty(): loadout.append(skill)
+	return loadout
+
+func _learned_skill(unit: Dictionary, skill_id: String) -> Dictionary:
+	if unit.is_empty() or skill_id not in unit.get("skills", []): return {}
+	return Skills.definition(skill_id)
+
+func skill_ready(id: int, skill_id: String) -> Dictionary:
+	var unit := get_unit(id)
+	if not _can_act(unit): return {"ok": false, "error": "当前无法释放技能"}
+	var skill := _learned_skill(unit, skill_id)
+	if skill.is_empty(): return {"ok": false, "error": "这只宠物没有该技能"}
+	if int(action_points[unit.side]) < int(skill.cost): return {"ok": false, "error": "%s 需要 %d 行动点" % [skill.name, skill.cost]}
+	if skill.kind == "ultimate" and int(unit.get("charge", 0)) < Skills.CHARGE_MAX: return {"ok": false, "error": "大招需要满 %d 格充能" % Skills.CHARGE_MAX}
+	return {"ok": true, "skill": skill}
+
+func skill_area(skill_id: String, center: Vector2i) -> Array[Vector2i]:
+	var area: Array[Vector2i] = []
+	var skill := Skills.definition(skill_id)
+	if skill.is_empty() or not _inside(center): return area
+	# 仅公开技能几何范围，不用未知墙体裁剪高亮，以免泄露迷雾地形。
+	for y in range(center.y - int(skill.radius), center.y + int(skill.radius) + 1):
+		for x in range(center.x - int(skill.radius), center.x + int(skill.radius) + 1):
+			var cell := Vector2i(x, y)
+			if _inside(cell) and distance(cell, center) <= int(skill.radius): area.append(cell)
+	return area
+
+func _skill_hits(unit: Dictionary, skill: Dictionary, center: Vector2i, visible_only: bool) -> Array[Dictionary]:
+	var hits: Array[Dictionary] = []
+	for target in units:
+		if target.hp <= 0 or target.side == unit.side or distance(target.cell, center) > int(skill.radius): continue
+		if visible_only and not _sight_for(unit.side).has(target.cell): continue
+		if not has_line_of_sight(center, target.cell) or not has_line_of_sight(unit.cell, target.cell): continue
+		var damage := _skill_damage(unit, skill, target)
+		hits.append({"id": target.id, "cell": target.cell, "name": target.name, "damage": damage, "defeated": int(target.hp) <= damage})
+	return hits
+
+func _skill_damage(unit: Dictionary, skill: Dictionary, target: Dictionary) -> int:
+	return maxi(1, roundi(float(unit.damage) * float(skill.damage_scale)) - (3 if target.guard else 0))
+
+func skill_preview(id: int, skill_id: String, target_cell: Vector2i) -> Dictionary:
+	var ready := skill_ready(id, skill_id)
+	if not ready.ok: return ready
+	var unit := get_unit(id)
+	var skill: Dictionary = ready.skill
+	var target := unit_at(target_cell)
+	if target.is_empty() or target.side == unit.side or not _sight_for(unit.side).has(target_cell): return {"ok": false, "error": "请选择可见敌人作为技能目标"}
+	if distance(unit.cell, target_cell) > int(unit.range) + int(skill.range_bonus): return {"ok": false, "error": "目标在技能射程之外"}
+	if not has_line_of_sight(unit.cell, target_cell): return {"ok": false, "error": "技能路线被墙体遮挡"}
+	var hits := _skill_hits(unit, skill, target_cell, true)
+	return {
+		"ok": true, "skill_id": skill_id, "skill_name": skill.name, "cost": skill.cost,
+		"hits": hits, "area": skill_area(skill_id, target_cell), "damage": _skill_damage(unit, skill, target), "target": target.name,
+		"charge_gain": mini(Skills.NORMAL_CHARGE_GAIN, maxi(0, Skills.CHARGE_MAX - int(unit.get("charge", 0)))) if skill.kind == "normal" else 0,
+		"charge_spent": Skills.ULTIMATE_CHARGE_COST if skill.kind == "ultimate" else 0
+	}
+
+func skill_targets(id: int, skill_id: String) -> Dictionary:
+	var cells: Dictionary = {}
+	if not skill_ready(id, skill_id).ok: return cells
+	var unit := get_unit(id)
+	for target in units:
+		if target.hp > 0 and target.side != unit.side and _sight_for(unit.side).has(target.cell) and skill_preview(id, skill_id, target.cell).ok: cells[target.cell] = true
+	return cells
+
+func cast_skill(id: int, skill_id: String, target_cell: Vector2i) -> Dictionary:
+	var result := skill_preview(id, skill_id, target_cell)
+	if not result.ok: return result
+	var unit := get_unit(id)
+	var skill := _learned_skill(unit, skill_id)
+	var sight_before := _sight_for(unit.side).duplicate()
+	var actual_hits := _skill_hits(unit, skill, target_cell, false)
+	var reported_hits: Array[Dictionary] = []
+	action_points[unit.side] -= int(skill.cost)
+	for hit in actual_hits:
+		var target := get_unit(int(hit.id))
+		target.hp = maxi(0, int(target.hp) - int(hit.damage))
+		hit.defeated = target.hp == 0
+		if sight_before.has(hit.cell): reported_hits.append(hit)
+	unit.charge = 0 if skill.kind == "ultimate" else mini(Skills.CHARGE_MAX, int(unit.get("charge", 0)) + Skills.NORMAL_CHARGE_GAIN)
+	result.hits = reported_hits
+	result["defeated"] = unit_at(target_cell).is_empty()
+	result["charge"] = unit.charge
+	# 范围技能可伤及隐藏敌军，预览和战报仅返回施法前已见敌军，不能泄露数量或属性。
+	refresh_visibility(); _check_elimination(); _queue_reactions(unit.side)
+	return result
 
 func _apply_attack(unit: Dictionary, target_cell: Vector2i, result: Dictionary) -> void:
 	var target := unit_at(target_cell)
 	target.hp = maxi(0, int(target.hp) - int(result.damage))
 	result["target"] = target.name; result["defeated"] = target.hp == 0
 	refresh_visibility(); _check_elimination()
-
-func attack_unit(id: int, target_cell: Vector2i) -> Dictionary:
-	var result := attack_preview(id, target_cell)
-	if not result.ok: return result
-	var unit := get_unit(id)
-	action_points[unit.side] -= ATTACK_COST; result["cost"] = ATTACK_COST
-	_apply_attack(unit, target_cell, result); _queue_reactions(unit.side)
-	return result
 
 func defend_unit(id: int) -> Dictionary:
 	var unit := get_unit(id)
@@ -435,12 +515,13 @@ func step_enemy() -> Dictionary:
 		return {"ok": true, "action": "round", "message": "区域已结算，新的回合开始", "visible": true}
 	var seen_before := visible_cells.has(unit.cell)
 	var targets := _visible_targets(unit)
-	for target in targets:
-		if attack_preview(unit.id, target.cell).ok:
-			var result := attack_unit(unit.id, target.cell)
-			return {"ok": true, "action": "attack", "actor_id": unit.id, "message": "%s 攻击 %s，造成 %d 伤害" % [unit.name, target.name, result.damage], "visible": true}
+	var chosen := _choose_enemy_skill(unit, targets)
+	if not chosen.is_empty():
+		var result := cast_skill(unit.id, chosen.skill_id, chosen.cell)
+		return {"ok": true, "action": "skill", "skill_id": chosen.skill_id, "actor_id": unit.id, "message": "%s 释放 %s，命中 %d 个已见目标" % [unit.name, result.skill_name, result.hits.size()], "visible": true}
 	var budget := mini(int(action_points.enemy), int(unit.move))
-	if not targets.is_empty() and int(action_points.enemy) > ATTACK_COST: budget = mini(budget, int(action_points.enemy) - ATTACK_COST)
+	var reserve := _cheapest_ready_skill(unit)
+	if not targets.is_empty() and int(action_points.enemy) > reserve: budget = mini(budget, int(action_points.enemy) - reserve)
 	var path := _advance_path(unit, _goal_for(unit, targets), budget)
 	if not path.is_empty():
 		var moved := move_unit(unit.id, path.back())
@@ -450,6 +531,26 @@ func step_enemy() -> Dictionary:
 	var defended := defend_unit(unit.id)
 	_enemy_finished[unit.id] = true
 	return {"ok": true, "action": "defend" if defended.ok else "wait", "actor_id": unit.id, "message": "敌人守住区域" if seen_before else "", "visible": seen_before}
+
+func _cheapest_ready_skill(unit: Dictionary) -> int:
+	var cost := TURN_AP
+	for skill in skill_loadout(unit.id):
+		if skill.kind != "ultimate" or int(unit.get("charge", 0)) >= Skills.CHARGE_MAX: cost = mini(cost, int(skill.cost))
+	return cost
+
+func _choose_enemy_skill(unit: Dictionary, targets: Array[Dictionary]) -> Dictionary:
+	var chosen: Dictionary = {}
+	var best := -1
+	for skill in skill_loadout(unit.id):
+		for target in targets:
+			var preview := skill_preview(unit.id, skill.id, target.cell)
+			if not preview.ok: continue
+			# 只按预览中本方已见目标估值，隐藏敌军不能影响技能或目标选择。
+			var value := 0
+			for hit: Dictionary in preview.hits: value += int(hit.damage) + (20 if hit.defeated else 0)
+			value = value * 10 / int(skill.cost) + (100 if skill.kind == "ultimate" else 0)
+			if value > best: best = value; chosen = {"skill_id": skill.id, "cell": target.cell}
+	return chosen
 
 func _finish_round() -> void:
 	_resolve_regions(); _check_elimination()

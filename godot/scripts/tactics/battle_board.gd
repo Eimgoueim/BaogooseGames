@@ -15,6 +15,9 @@ var selected_id: int = -1
 var reachable: Dictionary = {}
 var preview_path: Array[Vector2i] = []
 var deployment_cells: Dictionary = {}
+var skill_targets: Dictionary = {}
+var skill_area: Array[Vector2i] = []
+var skill_hit_cells: Dictionary = {}
 
 var _zoom := 1.0
 var _camera_center := Vector2(480.0, 480.0)
@@ -120,6 +123,12 @@ func _draw() -> void:
 				draw_rect(rect, Color(0.20, 0.8, 0.45, 0.32), true)
 			if cell in preview_path:
 				draw_rect(rect.grow(-rect.size.x * 0.34), Color(0.3, 0.68, 1.0, 0.85), true)
+			if cell in skill_area:
+				draw_rect(rect, Color(1.0, 0.52, 0.15, 0.3), true)
+			if skill_hit_cells.has(cell):
+				draw_rect(rect, Color(0.92, 0.2, 0.18, 0.48), true)
+			if skill_targets.has(cell):
+				draw_rect(rect.grow(-maxf(2.0, rect.size.x * 0.12)), Color("#ffad45"), false, maxf(2.0, _zoom * 2.2))
 			draw_rect(rect, Color(0.18, 0.22, 0.2, 0.3), false, maxf(1.0, _zoom))
 			if battle.has_method("unit_at"):
 				var unit: Dictionary = battle.call("unit_at", cell)
@@ -179,7 +188,9 @@ func _draw_regions(regions: Array, memory: Dictionary, font: Font, font_size: in
 func _draw_unit(unit: Dictionary, rect: Rect2, font: Font, font_size: int) -> void:
 	var kind := str(unit.get("kind", "pet"))
 	var inset := rect.size.x * (0.22 if kind == "soldier" else 0.13)
-	var token := Rect2(rect.position + Vector2(inset, inset), rect.size - Vector2.ONE * inset * 2.0)
+	var charge_max := maxi(0, int(unit.get("charge_max", 0))) if kind == "pet" else 0
+	var top_inset := maxf(inset, rect.size.y * 0.27) if charge_max > 0 else inset
+	var token := Rect2(rect.position + Vector2(inset, top_inset), rect.size - Vector2(inset * 2.0, top_inset + inset))
 	var side := str(unit.get("side", "ally"))
 	if kind == "soldier":
 		var side_color := Color("#c64e5b") if side == "enemy" else Color("#58b681")
@@ -215,6 +226,8 @@ func _draw_unit(unit: Dictionary, rect: Rect2, font: Font, font_size: int) -> vo
 	draw_rect(bar, Color("#432f39"), true)
 	bar.size.x *= clampf(float(hp) / max_hp, 0.0, 1.0)
 	draw_rect(bar, Color("#74c786") if hp * 2 >= max_hp else Color("#e9a46f"), true)
+	if charge_max > 0:
+		_draw_charge(unit, rect, charge_max)
 	if kind == "pet" and _zoom >= 0.75:
 		var unit_name := str(unit.get("name", species))
 		var name_limit := 2 if unit_name.to_utf8_buffer().size() > unit_name.length() else 4
@@ -228,6 +241,20 @@ func _draw_unit(unit: Dictionary, rect: Rect2, font: Font, font_size: int) -> vo
 		draw_rect(badge, badge_color, true)
 		if rect.size.x >= 24:
 			draw_string(font, badge.position + Vector2(0.0, badge.size.y * 0.82), "兵", HORIZONTAL_ALIGNMENT_CENTER, badge.size.x, maxi(14, roundi(14.0 * _zoom)), Color.WHITE)
+
+func _draw_charge(unit: Dictionary, rect: Rect2, charge_max: int) -> void:
+	var charge := clampi(int(unit.get("charge", 0)), 0, charge_max)
+	var full := charge >= charge_max
+	var radius := maxf(1.0, rect.size.x * 0.045)
+	var gap := radius * 2.7
+	var center_x := rect.get_center().x - gap * float(charge_max - 1) * 0.5
+	var center_y := rect.position.y + rect.size.y * 0.175
+	for index in range(charge_max):
+		var center := Vector2(center_x + gap * index, center_y)
+		var fill := Color("#e8b84e") if index < charge else Color("#756849")
+		draw_circle(center, radius, fill)
+		if full:
+			draw_arc(center, radius + maxf(0.5, _zoom), 0.0, TAU, 24, Color("#ffe59b"), maxf(0.8, _zoom), true)
 
 func _command_bounds(commands: Array) -> Rect2:
 	var left := INF
