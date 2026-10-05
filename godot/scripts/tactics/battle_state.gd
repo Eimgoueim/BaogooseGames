@@ -1,12 +1,19 @@
 extends RefCounted
 
 const Map = preload("res://scripts/tactics/battle_map.gd")
-const TARGET_SCORE := 6
+const TARGET_SCORE := 30
+const TURN_AP := 24
+const ATTACK_COST := 4
+const DEFEND_COST := 2
+const SOLDIER_HEALTH := 12
+const SOLDIER_DAMAGE := 3
+const SOLDIER_MOVE := 2
+const SOLDIER_SIGHT := 4
 const VICTORY_CREDITS := 60
 const VICTORY_POINTS := 10
 const VICTORY_EXPERIENCE := 20
 const DIRECTIONS: Array[Vector2i] = [Vector2i.RIGHT, Vector2i.DOWN, Vector2i.LEFT, Vector2i.UP]
-# 仅战棋使用的初版参数，不修改养成配置。依次为生命、移动、视野、射程、伤害。
+# 仅战棋使用的参数，不修改养成配置。依次为生命、AI单次推进、视野、射程、伤害。
 const PROFILES := {
 	"dragon": [32, 5, 6, 1, 8], "goose": [26, 6, 6, 1, 9],
 	"cat": [24, 7, 7, 1, 8], "whale": [36, 4, 6, 2, 8],
@@ -16,52 +23,61 @@ const PROFILES := {
 
 var tiles: Dictionary = {}
 var units: Array[Dictionary] = []
-var objectives: Array[Dictionary] = []
+var regions: Array[Dictionary] = []
+var region_memory: Dictionary = {}
+var enemy_region_memory: Dictionary = {}
 var visible_cells: Dictionary = {}
 var explored_cells: Dictionary = {}
 var enemy_visible_cells: Dictionary = {}
 var enemy_explored_cells: Dictionary = {}
 var enemy_memory: Dictionary = {}
 var last_seen_enemies: Dictionary = {}
-var enemy_objective_memory: Dictionary = {}
+var action_points := {"ally": TURN_AP, "enemy": TURN_AP}
+var deploy_budget := {"ally": 1, "enemy": 1}
 var phase := "player"
 var round_number := 1
 var score_ally := 0
 var score_enemy := 0
 var _enemy_order: Array[int] = []
+var _enemy_finished: Dictionary = {}
 var _enemy_cursor := 0
+var _enemy_deployment_pending := false
+var _reaction_order: Array[int] = []
+var _next_soldier_id := 1000
 
 func setup(pets: Array, _catalog: Dictionary) -> void:
-	tiles = Map.create_tiles()
-	units.clear(); objectives.clear()
+	tiles = Map.create_tiles(); regions = Map.create_regions()
+	units.clear(); region_memory.clear(); enemy_region_memory.clear()
 	visible_cells.clear(); explored_cells.clear()
 	enemy_visible_cells.clear(); enemy_explored_cells.clear()
-	enemy_memory.clear(); last_seen_enemies.clear(); enemy_objective_memory.clear()
+	enemy_memory.clear(); last_seen_enemies.clear()
 	phase = "player"; round_number = 1; score_ally = 0; score_enemy = 0
-	_enemy_order.clear(); _enemy_cursor = 0
+	action_points = {"ally": TURN_AP, "enemy": TURN_AP}
+	deploy_budget = {"ally": 1, "enemy": 1}; _next_soldier_id = 1000
+	_enemy_order.clear(); _enemy_finished.clear(); _enemy_cursor = 0
+	_enemy_deployment_pending = false; _reaction_order.clear()
 	var level_sum := 0
 	for index in mini(pets.size(), 4):
 		var pet: Dictionary = pets[index]
 		level_sum += int(pet.get("level", 1))
 		var unit := _make_unit(index, "ally", str(pet.get("species", "dragon")), str(pet.get("name", "宠物")), int(pet.get("level", 1)), Map.ALLY_SPAWNS[index])
-		unit.pet_index = int(pet.get("pet_index", index))
-		units.append(unit)
+		unit.pet_index = int(pet.get("pet_index", index)); units.append(unit)
 	if units.is_empty(): phase = "lost"; return
 	var average_level := maxi(1, roundi(float(level_sum) / units.size()))
 	for index in mini(6, maxi(2, units.size() + 1)):
 		var species: String = ["goose", "cat", "dragon", "gpt", "whale", "gemini"][index]
 		var unit := _make_unit(100 + index, "enemy", species, "对手%d" % (index + 1), average_level, Map.ENEMY_SPAWNS[index])
 		unit.hp = maxi(12, unit.hp - 8); unit.max_hp = unit.hp
-		unit.damage = maxi(3, unit.damage - 2)
-		units.append(unit)
-	for cell in Map.OBJECTIVE_CELLS: objectives.append({"cell": cell, "owner": "neutral"})
+		unit.damage = maxi(3, unit.damage - 2); units.append(unit)
+	region_at(Map.ALLY_SPAWNS[0]).owner = "ally"
+	region_at(Map.ENEMY_SPAWNS[0]).owner = "enemy"
 	refresh_visibility()
 
 func _make_unit(id: int, side: String, species: String, unit_name: String, level: int, cell: Vector2i) -> Dictionary:
 	var profile: Array = PROFILES.get(species, PROFILES.dragon)
 	var growth := clampi(level - 1, 0, 10)
 	var health: int = int(profile[0]) + growth * 2
-	return {"id": id, "side": side, "cell": cell, "name": unit_name, "species": species, "level": level, "hp": health, "max_hp": health, "ap": 2, "move": int(profile[1]), "sight": int(profile[2]), "range": int(profile[3]), "damage": int(profile[4]) + growth / 3, "guard": false, "pet_index": -1, "stride": 0}
+	return {"id": id, "kind": "pet", "side": side, "cell": cell, "name": unit_name, "species": species, "level": level, "hp": health, "max_hp": health, "move": int(profile[1]), "sight": int(profile[2]), "range": int(profile[3]), "damage": int(profile[4]) + growth / 3, "guard": false, "pet_index": -1}
 
 func get_unit(id: int) -> Dictionary:
 	for unit in units:
@@ -71,6 +87,11 @@ func get_unit(id: int) -> Dictionary:
 func unit_at(cell: Vector2i) -> Dictionary:
 	for unit in units:
 		if unit.hp > 0 and unit.cell == cell: return unit
+	return {}
+
+func region_at(cell: Vector2i) -> Dictionary:
+	for region in regions:
+		if region.rect.has_point(cell): return region
 	return {}
 
 static func distance(a: Vector2i, b: Vector2i) -> int:
@@ -88,13 +109,16 @@ func _sight_for(side: String) -> Dictionary:
 func _known_for(side: String) -> Dictionary:
 	return explored_cells if side == "ally" else enemy_explored_cells
 
+func _regions_for(side: String) -> Dictionary:
+	return region_memory if side == "ally" else enemy_region_memory
+
 func _known_occupied(cell: Vector2i, side: String) -> bool:
 	var occupant := unit_at(cell)
 	return not occupant.is_empty() and (occupant.side == side or _sight_for(side).has(cell))
 
 func _movement_search(unit: Dictionary, goal := Vector2i(-1, -1), unlimited := false) -> Dictionary:
 	var origin: Vector2i = unit.cell
-	var budget: int = 10000 if unlimited else (int(unit.get("stride", 0)) if int(unit.get("stride", 0)) > 0 else int(unit.move))
+	var budget: int = 10000 if unlimited else (int(unit.move) if unit.get("kind", "pet") == "soldier" else int(action_points[unit.side]))
 	var costs := {origin: 0}
 	var parents: Dictionary = {}
 	var pending: Array[Vector2i] = [origin]
@@ -106,7 +130,7 @@ func _movement_search(unit: Dictionary, goal := Vector2i(-1, -1), unlimited := f
 		for direction in DIRECTIONS:
 			var next := current + direction
 			if not _inside(next): continue
-			# 未探索区按普通地面规划；不能通过移动高亮泄露墙体或隐藏敌人。
+			# 未探索区按普通地面规划，避免高亮泄露隐藏地形和敌人。
 			if known.has(next) and not _walkable(next): continue
 			if next != origin and _known_occupied(next, unit.side): continue
 			var cost: int = costs[current] + (2 if known.has(next) and tiles[next] == "brush" else 1)
@@ -114,16 +138,19 @@ func _movement_search(unit: Dictionary, goal := Vector2i(-1, -1), unlimited := f
 			costs[next] = cost; parents[next] = current; pending.append(next)
 	return {"costs": costs, "parents": parents}
 
+func _can_act(unit: Dictionary) -> bool:
+	return not unit.is_empty() and unit.hp > 0 and unit.get("kind", "pet") == "pet" and not has_pending_reactions() and phase == ("player" if unit.side == "ally" else "enemy")
+
 func reachable_cells(id: int) -> Dictionary:
 	var unit := get_unit(id)
-	if unit.is_empty() or unit.hp <= 0 or (unit.ap <= 0 and int(unit.get("stride", 0)) <= 0) or phase != ("player" if unit.side == "ally" else "enemy"): return {}
+	if not _can_act(unit) or int(action_points[unit.side]) <= 0: return {}
 	return _movement_search(unit).costs
 
-func path_to(id: int, destination: Vector2i) -> Array[Vector2i]:
-	var unit := get_unit(id)
+func movement_cost(id: int, destination: Vector2i) -> int:
+	return int(reachable_cells(id).get(destination, -1))
+
+func _route_to(unit: Dictionary, destination: Vector2i, search: Dictionary) -> Array[Vector2i]:
 	var path: Array[Vector2i] = []
-	if unit.is_empty(): return path
-	var search := _movement_search(unit)
 	if not search.costs.has(destination): return path
 	var current := destination
 	while current != unit.cell:
@@ -132,57 +159,97 @@ func path_to(id: int, destination: Vector2i) -> Array[Vector2i]:
 		current = search.parents[current]
 	return path
 
-func _can_act(unit: Dictionary) -> bool:
-	return not unit.is_empty() and unit.hp > 0 and phase == ("player" if unit.side == "ally" else "enemy")
+func path_to(id: int, destination: Vector2i) -> Array[Vector2i]:
+	var unit := get_unit(id)
+	if not _can_act(unit) or int(action_points[unit.side]) <= 0: return []
+	return _route_to(unit, destination, _movement_search(unit))
+
+func _walk_path(unit: Dictionary, path: Array[Vector2i], budget: int) -> Dictionary:
+	var walked: Array[Vector2i] = []
+	var spent := 0
+	for next in path:
+		var cost := 2 if tiles.get(next) == "brush" else 1
+		if not _walkable(next) or not unit_at(next).is_empty() or spent + cost > budget: break
+		unit.cell = next; spent += cost; walked.append(next)
+		refresh_visibility()
+	refresh_visibility()
+	return {"ok": not walked.is_empty(), "path": walked, "cost": spent, "interrupted": walked.size() < path.size()}
 
 func move_unit(id: int, destination: Vector2i) -> Dictionary:
 	var unit := get_unit(id)
-	if not _can_act(unit) or (unit.ap <= 0 and int(unit.get("stride", 0)) <= 0): return {"ok": false, "error": "当前无法移动", "path": []}
+	if not _can_act(unit) or int(action_points[unit.side]) <= 0: return {"ok": false, "error": "当前无法移动", "path": []}
 	var path := path_to(id, destination)
-	if path.is_empty(): return {"ok": false, "error": "请选移动范围内的空格", "path": []}
-	var continuation: bool = int(unit.get("stride", 0)) > 0
-	var remaining: int = int(unit.stride) if continuation else int(unit.move)
-	var walked: Array[Vector2i] = []
-	var interrupted := false
-	for next in path:
-		var cost := 2 if tiles[next] == "brush" else 1
-		if not _walkable(next) or not unit_at(next).is_empty() or cost > remaining:
-			interrupted = true; break
-		unit.cell = next; remaining -= cost; walked.append(next)
-		refresh_visibility()
-	if walked.is_empty():
-		refresh_visibility()
-		return {"ok": false, "error": "前方受阻，请重新规划", "path": []}
-	if not continuation: unit.ap -= 1
-	unit.stride = remaining if interrupted else 0
-	_capture_objectives()
-	return {"ok": true, "error": "遭遇障碍，剩余移动距离已保留" if interrupted else "", "path": walked}
+	if path.is_empty(): return {"ok": false, "error": "请选行动点足够的空格", "path": []}
+	var result := _walk_path(unit, path, int(action_points[unit.side]))
+	result["error"] = "前方受阻，请重新规划" if not result.ok else ("遭遇障碍，仅扣实际走过的点数" if result.interrupted else "")
+	if result.ok:
+		action_points[unit.side] -= int(result.cost); _queue_reactions(unit.side)
+	return result
 
-func attack_preview(id: int, target_cell: Vector2i) -> Dictionary:
-	var unit := get_unit(id)
+func _attack_check(unit: Dictionary, target_cell: Vector2i) -> Dictionary:
 	var target := unit_at(target_cell)
-	if not _can_act(unit) or unit.ap <= 0: return {"ok": false, "error": "当前无法攻击"}
 	if target.is_empty() or target.side == unit.side or not _sight_for(unit.side).has(target_cell): return {"ok": false, "error": "请选择可见敌人"}
 	if distance(unit.cell, target_cell) > unit.range: return {"ok": false, "error": "敌人在射程之外"}
 	if not has_line_of_sight(unit.cell, target_cell): return {"ok": false, "error": "攻击路线被墙体遮挡"}
 	return {"ok": true, "damage": maxi(1, int(unit.damage) - (3 if target.guard else 0))}
 
+func attack_preview(id: int, target_cell: Vector2i) -> Dictionary:
+	var unit := get_unit(id)
+	if not _can_act(unit) or int(action_points[unit.side]) < ATTACK_COST: return {"ok": false, "error": "攻击需要 %d 行动点" % ATTACK_COST}
+	return _attack_check(unit, target_cell)
+
+func _apply_attack(unit: Dictionary, target_cell: Vector2i, result: Dictionary) -> void:
+	var target := unit_at(target_cell)
+	target.hp = maxi(0, int(target.hp) - int(result.damage))
+	result["target"] = target.name; result["defeated"] = target.hp == 0
+	refresh_visibility(); _check_elimination()
+
 func attack_unit(id: int, target_cell: Vector2i) -> Dictionary:
 	var result := attack_preview(id, target_cell)
 	if not result.ok: return result
 	var unit := get_unit(id)
-	var target := unit_at(target_cell)
-	unit.ap -= 1; unit.stride = 0
-	target.hp = maxi(0, int(target.hp) - int(result.damage))
-	refresh_visibility(); _check_elimination()
-	result["target"] = target.name; result["defeated"] = target.hp == 0
+	action_points[unit.side] -= ATTACK_COST; result["cost"] = ATTACK_COST
+	_apply_attack(unit, target_cell, result); _queue_reactions(unit.side)
 	return result
 
 func defend_unit(id: int) -> Dictionary:
 	var unit := get_unit(id)
-	if not _can_act(unit) or unit.ap <= 0 or unit.guard: return {"ok": false, "error": "当前无法防御"}
-	unit.ap -= 1; unit.guard = true; unit.stride = 0
-	return {"ok": true, "error": ""}
+	if not _can_act(unit) or int(action_points[unit.side]) < DEFEND_COST or unit.guard: return {"ok": false, "error": "防御需要 %d 行动点，且不能重复防御" % DEFEND_COST}
+	action_points[unit.side] -= DEFEND_COST; unit.guard = true; _queue_reactions(unit.side)
+	return {"ok": true, "error": "", "cost": DEFEND_COST}
+
+func deployment_cells(side: String) -> Dictionary:
+	var cells: Dictionary = {}
+	if side not in ["ally", "enemy"] or phase != ("player" if side == "ally" else "enemy") or has_pending_reactions() or int(deploy_budget[side]) <= 0: return cells
+	for region in regions:
+		if region.owner != side: continue
+		for cell: Vector2i in _sight_for(side):
+			if region.rect.has_point(cell) and _walkable(cell) and unit_at(cell).is_empty(): cells[cell] = true
+	return cells
+
+func deploy_soldier(side: String, cell: Vector2i) -> Dictionary:
+	if not deployment_cells(side).has(cell): return {"ok": false, "error": "请在己方控制区域内的可见空地部署小兵"}
+	var soldier := {"id": _next_soldier_id, "kind": "soldier", "side": side, "cell": cell, "name": "我方小兵" if side == "ally" else "敌方小兵", "species": "goose", "level": 1, "hp": SOLDIER_HEALTH, "max_hp": SOLDIER_HEALTH, "move": SOLDIER_MOVE, "sight": SOLDIER_SIGHT, "range": 1, "damage": SOLDIER_DAMAGE, "guard": false, "pet_index": -1}
+	_next_soldier_id += 1; units.append(soldier); deploy_budget[side] -= 1
+	refresh_visibility()
+	return {"ok": true, "id": soldier.id, "error": ""}
+
+func has_pending_reactions() -> bool:
+	return not _reaction_order.is_empty()
+
+func _queue_reactions(acting_side: String) -> void:
+	if phase in ["won", "lost"]: return
+	# 只响应宠物的成功指令；快照保证每只对方小兵恰好行动一次，不递归触发。
+	for unit in units:
+		if unit.get("kind", "pet") == "soldier" and unit.side != acting_side and unit.hp > 0: _reaction_order.append(unit.id)
+
+func step_reaction() -> Dictionary:
+	if not has_pending_reactions() or phase in ["won", "lost"]: return {"ok": false, "visible": false, "message": ""}
+	var unit := get_unit(_reaction_order.pop_front())
+	if unit.is_empty() or unit.hp <= 0: return {"ok": true, "visible": false, "message": "", "skipped": true}
+	var result := _soldier_action(unit)
+	result["reaction"] = true; result["actor_id"] = unit.id
+	return result
 
 func has_line_of_sight(from: Vector2i, to: Vector2i) -> bool:
 	# 格子中心连线的保守遮挡：穿过墙角也算遮挡，避免隔角透视。
@@ -210,14 +277,10 @@ func refresh_visibility() -> void:
 			for x in range(maxi(0, origin.x - unit.sight), mini(Map.SIZE.x, origin.x + unit.sight + 1)):
 				var cell := Vector2i(x, y)
 				if distance(origin, cell) <= unit.sight and has_line_of_sight(origin, cell): vision[cell] = true; known[cell] = true
-	# 记忆仅记录实际看到的位置；重新看见空格时清除过时记忆。
 	_update_memory("enemy", visible_cells, last_seen_enemies)
 	_update_memory("ally", enemy_visible_cells, enemy_memory)
-	_update_objective_memory()
-
-func _update_objective_memory() -> void:
-	for objective in objectives:
-		if enemy_visible_cells.has(objective.cell): enemy_objective_memory[objective.cell] = objective.owner
+	_update_region_presence()
+	_update_region_memory("ally"); _update_region_memory("enemy")
 
 func _update_memory(target_side: String, sight: Dictionary, memory: Dictionary) -> void:
 	for id in memory.keys():
@@ -228,94 +291,179 @@ func _update_memory(target_side: String, sight: Dictionary, memory: Dictionary) 
 	for unit in units:
 		if unit.side == target_side and unit.hp > 0 and sight.has(unit.cell): memory[unit.id] = {"cell": unit.cell, "round": round_number, "name": unit.name}
 
-func _capture_objectives() -> void:
-	for objective in objectives:
-		var occupant := unit_at(objective.cell)
-		if not occupant.is_empty(): objective.owner = occupant.side
-	_update_objective_memory()
+func _region_presence(region: Dictionary, sight: Dictionary = {}, observer := "") -> Dictionary:
+	var presence := {"ally": false, "enemy": false}
+	for unit in units:
+		if unit.hp <= 0 or not region.rect.has_point(unit.cell): continue
+		if not observer.is_empty() and unit.side != observer and not sight.has(unit.cell): continue
+		presence[unit.side] = true
+	return presence
+
+func _update_region_presence() -> void:
+	for region in regions:
+		var presence := _region_presence(region)
+		region.contested = presence.ally and presence.enemy
+
+func _update_region_memory(side: String) -> void:
+	var sight := _sight_for(side)
+	var memory := _regions_for(side)
+	for region in regions:
+		var presence := _region_presence(region, sight, side)
+		var center: Vector2i = region.rect.position + region.rect.size / 2
+		# 区域中心或己方驻军提供归属信息；争夺提示只使用看见的敌人。
+		if presence[side] or sight.has(center):
+			memory[region.id] = {"owner": region.owner, "contested": presence.ally and presence.enemy}
+
+func _resolve_regions() -> void:
+	for region in regions:
+		var presence := _region_presence(region)
+		region.contested = presence.ally and presence.enemy
+		if not region.contested:
+			if presence.ally: region.owner = "ally"
+			elif presence.enemy: region.owner = "enemy"
 
 func _check_elimination() -> void:
 	var allies := 0; var enemies := 0
 	for unit in units:
-		if unit.hp <= 0: continue
+		if unit.hp <= 0 or unit.get("kind", "pet") != "pet": continue
 		if unit.side == "ally": allies += 1
 		else: enemies += 1
 	if allies == 0: phase = "lost"
 	elif enemies == 0: phase = "won"
+	if phase in ["won", "lost"]: _reaction_order.clear()
 
 func end_player_turn() -> bool:
-	if phase != "player": return false
-	phase = "enemy"; _enemy_cursor = 0; _enemy_order.clear()
+	if phase != "player" or has_pending_reactions(): return false
+	phase = "enemy"; _enemy_cursor = 0; _enemy_order.clear(); _enemy_finished.clear()
+	_enemy_deployment_pending = true; action_points.enemy = TURN_AP
 	for unit in units:
-		if unit.side == "enemy" and unit.hp > 0:
-			unit.ap = 2; unit.guard = false; unit.stride = 0; _enemy_order.append(unit.id)
+		if unit.side == "enemy" and unit.hp > 0 and unit.get("kind", "pet") == "pet":
+			unit.guard = false; _enemy_order.append(unit.id)
 	return true
 
-func step_enemy() -> Dictionary:
-	if phase != "enemy": return {"ok": false, "error": "敌方回合尚未开始"}
-	if _enemy_cursor >= _enemy_order.size():
-		_finish_round()
-		return {"ok": true, "message": "新的回合开始", "visible": true}
-	var unit := get_unit(_enemy_order[_enemy_cursor])
-	if unit.hp <= 0 or unit.ap <= 0:
-		_enemy_cursor += 1
-		return {"ok": true, "message": "", "visible": false}
-	var seen_before := visible_cells.has(unit.cell)
+func _visible_targets(unit: Dictionary) -> Array[Dictionary]:
 	var targets: Array[Dictionary] = []
 	for target in units:
-		if target.side == "ally" and target.hp > 0 and enemy_visible_cells.has(target.cell): targets.append(target)
+		if target.side != unit.side and target.hp > 0 and _sight_for(unit.side).has(target.cell): targets.append(target)
 	targets.sort_custom(func(a: Dictionary, b: Dictionary) -> bool: return distance(unit.cell, a.cell) < distance(unit.cell, b.cell))
-	for target in targets:
-		if attack_preview(unit.id, target.cell).ok:
-			var result := attack_unit(unit.id, target.cell)
-			return {"ok": true, "message": "%s 攻击 %s，造成 %d 伤害" % [unit.name, target.name, result.damage], "visible": true}
+	return targets
+
+func _goal_for(unit: Dictionary, targets: Array[Dictionary]) -> Vector2i:
+	if not targets.is_empty(): return targets[0].cell
+	var memory := last_seen_enemies if unit.side == "ally" else enemy_memory
 	var goal: Vector2i = unit.cell
-	if not targets.is_empty(): goal = targets[0].cell
-	elif not enemy_memory.is_empty():
-		var closest := 10000
-		for record: Dictionary in enemy_memory.values():
-			var d := distance(unit.cell, record.cell)
-			if d < closest: closest = d; goal = record.cell
-	else:
-		var closest := 10000
-		for objective in objectives:
-			if enemy_objective_memory.get(objective.cell, "neutral") == "enemy": continue
-			var d := distance(unit.cell, objective.cell)
-			if d < closest: closest = d; goal = objective.cell
-	if goal == unit.cell:
-		defend_unit(unit.id); unit.ap = 0
-		return {"ok": true, "message": "敌人守住阵地" if seen_before else "", "visible": seen_before}
-	# 选择朝目标推进的可达格；寻路只用敌方已探索地形和已看见的单位。
+	var closest := 10000
+	for record: Dictionary in memory.values():
+		var d := distance(unit.cell, record.cell)
+		if d < closest: closest = d; goal = record.cell
+	if closest < 10000: return goal
+	var known_regions := _regions_for(unit.side)
+	var here := region_at(unit.cell)
+	if not here.is_empty() and known_regions.get(here.id, {}).get("owner", "neutral") != unit.side: return unit.cell
+	for region in regions:
+		if known_regions.get(region.id, {}).get("owner", "neutral") == unit.side: continue
+		# 队友已进入的区域留给队友夺取，其他单位继续展开。
+		if _region_presence(region, _sight_for(unit.side), unit.side)[unit.side]: continue
+		var center: Vector2i = region.rect.position + region.rect.size / 2
+		var d := distance(unit.cell, center)
+		if d < closest: closest = d; goal = center
+	return goal
+
+func _advance_path(unit: Dictionary, goal: Vector2i, budget: int) -> Array[Vector2i]:
+	if budget <= 0 or goal == unit.cell: return []
 	var search := _movement_search(unit, Vector2i(-1, -1), true)
 	var destination: Vector2i = unit.cell
-	var best := 10000
+	var best := distance(unit.cell, goal)
 	for cell: Vector2i in search.costs:
 		var metric := distance(cell, goal)
 		if metric < best: best = metric; destination = cell
-	var route: Array[Vector2i] = []
-	var current := destination
-	while current != unit.cell and search.parents.has(current): route.push_front(current); current = search.parents[current]
+	var route := _route_to(unit, destination, search)
 	var cost := 0
-	destination = unit.cell
+	var path: Array[Vector2i] = []
 	for cell in route:
-		cost += 2 if enemy_explored_cells.has(cell) and tiles[cell] == "brush" else 1
-		if cost > unit.move: break
-		destination = cell
-	var result := move_unit(unit.id, destination)
-	if not result.ok: defend_unit(unit.id); unit.ap = 0
-	return {"ok": true, "message": "敌人调整位置" if seen_before or visible_cells.has(unit.cell) else "", "visible": seen_before or visible_cells.has(unit.cell)}
+		cost += 2 if _known_for(unit.side).has(cell) and tiles[cell] == "brush" else 1
+		if cost > budget: break
+		path.append(cell)
+	return path
+
+func _soldier_action(unit: Dictionary) -> Dictionary:
+	var seen_before: bool = unit.side == "ally" or visible_cells.has(unit.cell)
+	var targets := _visible_targets(unit)
+	for target in targets:
+		var attack := _attack_check(unit, target.cell)
+		if attack.ok:
+			_apply_attack(unit, target.cell, attack)
+			var observed: bool = seen_before or target.side == "ally"
+			return {"ok": true, "action": "attack", "visible": observed, "message": "%s 响应攻击 %s，造成 %d 伤害" % [unit.name, target.name, attack.damage] if observed else ""}
+	var path := _advance_path(unit, _goal_for(unit, targets), int(unit.move))
+	if not path.is_empty():
+		var result := _walk_path(unit, path, int(unit.move))
+		var observed: bool = seen_before or visible_cells.has(unit.cell)
+		return {"ok": true, "action": "move" if result.ok else "hold", "visible": observed, "message": "%s 自动推进" % unit.name if result.ok and observed else ("%s 守住区域" % unit.name if observed else "")}
+	return {"ok": true, "action": "hold", "visible": seen_before, "message": "%s 守住区域" % unit.name if seen_before else ""}
+
+func _deploy_enemy_soldier() -> Dictionary:
+	var cells := deployment_cells("enemy")
+	var chosen := Vector2i(-1, -1)
+	var best := 10000
+	for cell: Vector2i in cells:
+		var d := distance(cell, Map.SIZE / 2)
+		if d < best: best = d; chosen = cell
+	return deploy_soldier("enemy", chosen) if chosen.x >= 0 else {"ok": false}
+
+func step_enemy() -> Dictionary:
+	if phase != "enemy": return {"ok": false, "error": "敌方回合尚未开始"}
+	if has_pending_reactions(): return step_reaction()
+	if _enemy_deployment_pending:
+		var deployed := _deploy_enemy_soldier()
+		if deployed.ok:
+			var soldier := get_unit(deployed.id)
+			var observed := visible_cells.has(soldier.cell)
+			return {"ok": true, "action": "deploy", "visible": observed, "message": "敌方部署了小兵" if observed else ""}
+		_enemy_deployment_pending = false
+	if int(action_points.enemy) <= 0:
+		_finish_round()
+		return {"ok": true, "action": "round", "message": "区域已结算，新的回合开始", "visible": true}
+	# 轮流给敌方宠物下指令，避免共享行动点被第一只宠物全部占用。
+	var unit: Dictionary = {}
+	for index in _enemy_order.size():
+		var candidate := get_unit(_enemy_order[_enemy_cursor])
+		_enemy_cursor = (_enemy_cursor + 1) % _enemy_order.size()
+		if candidate.hp > 0 and not _enemy_finished.has(candidate.id): unit = candidate; break
+	if unit.is_empty():
+		_finish_round()
+		return {"ok": true, "action": "round", "message": "区域已结算，新的回合开始", "visible": true}
+	var seen_before := visible_cells.has(unit.cell)
+	var targets := _visible_targets(unit)
+	for target in targets:
+		if attack_preview(unit.id, target.cell).ok:
+			var result := attack_unit(unit.id, target.cell)
+			return {"ok": true, "action": "attack", "actor_id": unit.id, "message": "%s 攻击 %s，造成 %d 伤害" % [unit.name, target.name, result.damage], "visible": true}
+	var budget := mini(int(action_points.enemy), int(unit.move))
+	if not targets.is_empty() and int(action_points.enemy) > ATTACK_COST: budget = mini(budget, int(action_points.enemy) - ATTACK_COST)
+	var path := _advance_path(unit, _goal_for(unit, targets), budget)
+	if not path.is_empty():
+		var moved := move_unit(unit.id, path.back())
+		if moved.ok:
+			var observed := seen_before or visible_cells.has(unit.cell)
+			return {"ok": true, "action": "move", "actor_id": unit.id, "message": "敌人移动，消耗 %d 点" % moved.cost if observed else "", "visible": observed}
+	var defended := defend_unit(unit.id)
+	_enemy_finished[unit.id] = true
+	return {"ok": true, "action": "defend" if defended.ok else "wait", "actor_id": unit.id, "message": "敌人守住区域" if seen_before else "", "visible": seen_before}
 
 func _finish_round() -> void:
-	_capture_objectives(); _check_elimination()
+	_resolve_regions(); _check_elimination()
 	if phase in ["won", "lost"]: return
-	for objective in objectives:
-		if objective.owner == "ally": score_ally += 1
-		elif objective.owner == "enemy": score_enemy += 1
+	for region in regions:
+		if region.contested: continue
+		if region.owner == "ally": score_ally += 1
+		elif region.owner == "enemy": score_enemy += 1
 	# 同轮都达到目标时，分数较高者获胜；平分继续争夺。
 	if score_ally >= TARGET_SCORE and score_ally > score_enemy: phase = "won"
 	elif score_enemy >= TARGET_SCORE and score_enemy > score_ally: phase = "lost"
 	else:
-		phase = "player"; round_number += 1
+		phase = "player"; round_number += 1; action_points.ally = TURN_AP
+		deploy_budget.ally += 1; deploy_budget.enemy += 1
 		for unit in units:
-			if unit.side == "ally" and unit.hp > 0: unit.ap = 2; unit.guard = false; unit.stride = 0
+			if unit.side == "ally" and unit.hp > 0 and unit.get("kind", "pet") == "pet": unit.guard = false
 	refresh_visibility()

@@ -2,14 +2,30 @@ extends RefCounted
 
 ## 24×24 固定战场。地形字符串由战斗规则解释：wall/water 不可通行，brush 移动消耗为 2。
 const SIZE := Vector2i(24, 24)
+const REGION_SIZE := Vector2i(8, 8)
+const REGION_GRID := Vector2i(3, 3)
 const ALLY_SPAWNS: Array[Vector2i] = [
 	Vector2i(2, 10), Vector2i(2, 11), Vector2i(2, 12), Vector2i(2, 13),
 ]
 const ENEMY_SPAWNS: Array[Vector2i] = [
-	Vector2i(21, 5), Vector2i(22, 6), Vector2i(21, 7),
-	Vector2i(21, 16), Vector2i(22, 17), Vector2i(21, 18),
+	Vector2i(21, 10), Vector2i(21, 11), Vector2i(21, 12), Vector2i(21, 13),
+	Vector2i(22, 10), Vector2i(22, 13),
 ]
-const OBJECTIVE_CELLS: Array[Vector2i] = [Vector2i(12, 6), Vector2i(12, 17)]
+
+
+static func create_regions() -> Array[Dictionary]:
+	var regions: Array[Dictionary] = []
+	for row in range(REGION_GRID.y):
+		for col in range(REGION_GRID.x):
+			var region_id := row * REGION_GRID.x + col
+			regions.append({
+				"id": region_id,
+				"name": "R%d" % (region_id + 1),
+				"rect": Rect2i(col * REGION_SIZE.x, row * REGION_SIZE.y, REGION_SIZE.x, REGION_SIZE.y),
+				"owner": "neutral",
+				"contested": false,
+			})
+	return regions
 
 
 static func create_tiles() -> Dictionary:
@@ -34,12 +50,13 @@ static func create_tiles() -> Dictionary:
 	_paint_rect(tiles, Rect2i(10, 8, 2, 1), "wall")
 	_paint_rect(tiles, Rect2i(10, 15, 2, 1), "wall")
 
-	# 主路贯通全图，纵向支路连接两个据点；据点和出生格周围保持通畅。
+	# 主路贯通全图，纵向支路连接各区域；出生格周围保持通畅。
 	_paint_rect(tiles, Rect2i(0, 11, SIZE.x, 2), "road")
 	_paint_rect(tiles, Rect2i(11, 5, 2, 14), "road")
 	_paint_rect(tiles, Rect2i(2, 9, 2, 6), "road")
 	_paint_rect(tiles, Rect2i(20, 4, 3, 5), "road")
 	_paint_rect(tiles, Rect2i(20, 15, 3, 5), "road")
+	_paint_rect(tiles, Rect2i(20, 9, 3, 6), "road")
 	# 侧路接入中央主路，在上下两翼形成可选绕行路线。
 	_paint_rect(tiles, Rect2i(5, 6, 8, 1), "road")
 	_paint_rect(tiles, Rect2i(5, 17, 8, 1), "road")

@@ -14,6 +14,7 @@ var catalog: Dictionary = {}
 var selected_id: int = -1
 var reachable: Dictionary = {}
 var preview_path: Array[Vector2i] = []
+var deployment_cells: Dictionary = {}
 
 var _zoom := 1.0
 var _camera_center := Vector2(480.0, 480.0)
@@ -80,6 +81,10 @@ func _draw() -> void:
 	var font := get_theme_default_font()
 	var font_size := maxi(14, roundi(14.0 * _zoom))
 	var last_seen_cells := _last_seen_cells(explored, visible)
+	var regions_value: Variant = battle.get("regions")
+	var regions: Array = regions_value if regions_value is Array else []
+	var memory_value: Variant = battle.get("region_memory")
+	var region_memory: Dictionary = memory_value if memory_value is Dictionary else {}
 	var origin := _origin()
 	var first_x := maxi(0, floori((-origin.x) / (TILE_SIZE * _zoom)))
 	var first_y := maxi(0, floori((-origin.y) / (TILE_SIZE * _zoom)))
@@ -101,51 +106,87 @@ func _draw() -> void:
 					draw_line(rect.position + rect.size * Vector2(0.15, 0.35), rect.position + rect.size * Vector2(0.85, 0.35), Color("#d6f1e9", 0.55), maxf(1.0, _zoom * 2.0))
 				elif ground == "wall":
 					draw_rect(Rect2(rect.position + rect.size * 0.12, rect.size * 0.76), Color("#a39b89"), true)
-				if not visible.has(cell):
-					draw_rect(rect, Color("#344050", 0.48), true)
+			var region_state := _region_memory_for_cell(cell, regions, region_memory)
+			if not region_state.is_empty():
+				draw_rect(rect, _region_tint(region_state), true)
+			if explored.has(cell) and not visible.has(cell):
+				draw_rect(rect, Color("#344050", 0.48), true)
 			if last_seen_cells.has(cell):
 				draw_circle(rect.get_center(), rect.size.x * 0.16, Color("#5c4c4a", 0.55))
 				draw_string(font, rect.position + Vector2(rect.size.x * 0.36, rect.size.y * 0.7), "?", HORIZONTAL_ALIGNMENT_LEFT, -1, font_size, Color("#f1d7c0", 0.78))
 			if reachable.has(cell):
-				draw_rect(rect, Color(0.25, 0.58, 0.95, 0.38), true)
+				draw_rect(rect, Color(0.25, 0.58, 0.95, 0.38 if explored.has(cell) else 0.15), true)
+			if deployment_cells.has(cell):
+				draw_rect(rect, Color(0.20, 0.8, 0.45, 0.32), true)
 			if cell in preview_path:
 				draw_rect(rect.grow(-rect.size.x * 0.34), Color(0.3, 0.68, 1.0, 0.85), true)
 			draw_rect(rect, Color(0.18, 0.22, 0.2, 0.3), false, maxf(1.0, _zoom))
-			_draw_objective(cell, rect, visible, font, font_size)
 			if battle.has_method("unit_at"):
 				var unit: Dictionary = battle.call("unit_at", cell)
 				if not unit.is_empty() and int(unit.get("hp", 0)) > 0:
 					var side := str(unit.get("side", ""))
 					if side == "ally" or visible.has(cell):
 						_draw_unit(unit, rect, font, font_size)
+	_draw_regions(regions, region_memory, font, font_size)
 	if selected_id >= 0:
 		for unit in battle.get("units"):
-			if int(unit.get("id", -2)) == selected_id:
+			if int(unit.get("id", -2)) == selected_id and str(unit.get("kind", "pet")) == "pet":
 				var selected_cell: Vector2i = unit.get("cell", Vector2i(-1, -1))
 				if explored.has(selected_cell):
 					draw_rect(_cell_rect(selected_cell).grow(-_zoom * 2.0), Color("#fff2a6"), false, maxf(2.0, _zoom * 3.0))
 				break
 
-func _draw_objective(cell: Vector2i, rect: Rect2, visible: Dictionary, font: Font, font_size: int) -> void:
-	for objective in battle.get("objectives"):
-		if objective.get("cell", Vector2i(-1, -1)) != cell:
-			continue
-		var mark_color := Color("#eed078")
-		if visible.has(cell):
-			match str(objective.get("owner", "neutral")):
-				"ally": mark_color = Color("#72c9a1")
-				"enemy": mark_color = Color("#e8797e")
-		draw_circle(rect.get_center(), rect.size.x * 0.2, Color(0.12, 0.15, 0.16, 0.8))
-		draw_circle(rect.get_center(), rect.size.x * 0.13, mark_color)
-		draw_string(font, rect.position + Vector2(rect.size.x * 0.39, rect.size.y * 0.68), "◆", HORIZONTAL_ALIGNMENT_LEFT, -1, font_size, Color("#303744"))
+func _region_memory_for_cell(cell: Vector2i, regions: Array, memory: Dictionary) -> Dictionary:
+	for region in regions:
+		var area: Rect2i = region.get("rect", Rect2i())
+		if area.has_point(cell):
+			var record: Variant = memory.get(int(region.get("id", -1)), {})
+			return record if record is Dictionary else {"owner": "neutral", "contested": false}
+	return {}
+
+func _region_tint(memory: Dictionary) -> Color:
+	if bool(memory.get("contested", false)):
+		return Color(0.95, 0.77, 0.22, 0.12)
+	match str(memory.get("owner", "neutral")):
+		"ally": return Color(0.22, 0.72, 0.43, 0.13)
+		"enemy": return Color(0.82, 0.29, 0.34, 0.13)
+		_: return Color(0.52, 0.55, 0.59, 0.07)
+
+func _draw_regions(regions: Array, memory: Dictionary, font: Font, font_size: int) -> void:
+	for index in regions.size():
+		var region: Dictionary = regions[index]
+		var area: Rect2i = region.get("rect", Rect2i())
+		var screen_rect := Rect2(_origin() + Vector2(area.position) * TILE_SIZE * _zoom, Vector2(area.size) * TILE_SIZE * _zoom)
+		var record: Variant = memory.get(int(region.get("id", -1)), {})
+		var known: Dictionary = record if record is Dictionary else {}
+		var tint := _region_tint(known)
+		var outline := Color(tint.r, tint.g, tint.b, 0.86)
+		if bool(known.get("contested", false)):
+			outline = Color("#f1c94d")
+		draw_rect(screen_rect, outline, false, maxf(2.0, _zoom * 2.0))
+		var title := str(region.get("name", "R%d" % (index + 1)))
+		if bool(known.get("contested", false)):
+			title += " · 争夺"
+		else:
+			match str(known.get("owner", "neutral")):
+				"ally": title += " · 我方"
+				"enemy": title += " · 敌方"
+		var label_rect := Rect2(screen_rect.position + Vector2(3.0, 3.0), Vector2(minf(screen_rect.size.x - 6.0, 154.0 * _zoom), maxf(20.0, 19.0 * _zoom)))
+		if label_rect.size.x > 0.0 and label_rect.size.y > 0.0:
+			draw_rect(label_rect, Color("#222b30", 0.7), true)
+			draw_string(font, label_rect.position + Vector2(3.0, label_rect.size.y * 0.78), title, HORIZONTAL_ALIGNMENT_LEFT, label_rect.size.x - 6.0, font_size, Color("#f3f0df"))
 
 func _draw_unit(unit: Dictionary, rect: Rect2, font: Font, font_size: int) -> void:
-	var inset := rect.size.x * 0.13
+	var kind := str(unit.get("kind", "pet"))
+	var inset := rect.size.x * (0.22 if kind == "soldier" else 0.13)
 	var token := Rect2(rect.position + Vector2(inset, inset), rect.size - Vector2.ONE * inset * 2.0)
 	var side := str(unit.get("side", "ally"))
-	if side == "enemy":
+	if kind == "soldier":
+		var side_color := Color("#c64e5b") if side == "enemy" else Color("#58b681")
+		draw_rect(token.grow(rect.size.x * 0.06), side_color, false, maxf(2.0, _zoom * 2.5))
+	elif side == "enemy":
 		draw_rect(token.grow(rect.size.x * 0.025), Color("#c64e5b"), false, maxf(2.0, _zoom * 2.0))
-	var species := str(unit.get("species", ""))
+	var species := "goose" if kind == "soldier" else str(unit.get("species", ""))
 	var pets: Dictionary = art.get("pets", {})
 	var species_art: Dictionary = pets.get(species, {})
 	var stage := 0
@@ -174,15 +215,19 @@ func _draw_unit(unit: Dictionary, rect: Rect2, font: Font, font_size: int) -> vo
 	draw_rect(bar, Color("#432f39"), true)
 	bar.size.x *= clampf(float(hp) / max_hp, 0.0, 1.0)
 	draw_rect(bar, Color("#74c786") if hp * 2 >= max_hp else Color("#e9a46f"), true)
-	if _zoom >= 0.75:
+	if kind == "pet" and _zoom >= 0.75:
 		var unit_name := str(unit.get("name", species))
 		var name_limit := 2 if unit_name.to_utf8_buffer().size() > unit_name.length() else 4
 		if unit_name.length() > name_limit:
 			unit_name = unit_name.substr(0, name_limit)
 		draw_string(font, Vector2(rect.position.x, rect.end.y - rect.size.y * 0.08), unit_name, HORIZONTAL_ALIGNMENT_CENTER, rect.size.x, font_size, Color("#26303b"))
-	var ap := clampi(int(unit.get("ap", 0)), 0, 2)
-	for i in range(2):
-		draw_circle(Vector2(rect.end.x - rect.size.x * (0.2 + i * 0.17), rect.position.y + rect.size.y * 0.2), maxf(1.8, rect.size.x * 0.045), Color("#fff1a8") if i < ap else Color("#52606a"))
+	if kind == "soldier":
+		var badge_color := Color("#c64e5b") if side == "enemy" else Color("#399568")
+		var badge_size := maxf(18.0, rect.size.x * 0.4) if rect.size.x >= 24 else rect.size.x * 0.32
+		var badge := Rect2(rect.end - Vector2.ONE * (badge_size + rect.size.x * 0.04), Vector2.ONE * badge_size)
+		draw_rect(badge, badge_color, true)
+		if rect.size.x >= 24:
+			draw_string(font, badge.position + Vector2(0.0, badge.size.y * 0.82), "兵", HORIZONTAL_ALIGNMENT_CENTER, badge.size.x, maxi(14, roundi(14.0 * _zoom)), Color.WHITE)
 
 func _command_bounds(commands: Array) -> Rect2:
 	var left := INF

@@ -37,6 +37,8 @@ var _end_button: Button
 var _move_button: Button
 var _attack_button: Button
 var _guard_button: Button
+var _deploy_button: Button
+var _territories: Label
 var _exit_button: Button
 var _start_button: Button
 var _layout_pending := false
@@ -92,7 +94,7 @@ func _build() -> void:
 	_header = _panel(); _content.add_child(_header)
 	var header_column := VBoxContainer.new(); _header.add_child(header_column)
 	var top := HBoxContainer.new(); header_column.add_child(top)
-	var title := _label("宠物战棋 · 双据点争夺", 18)
+	var title := _label("宠物战棋 · 区域争夺", 18)
 	title.autowrap_mode = TextServer.AUTOWRAP_OFF
 	title.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
 	title.size_flags_horizontal = Control.SIZE_EXPAND_FILL; top.add_child(title)
@@ -109,8 +111,10 @@ func _build() -> void:
 	_info = _label("", 14); column.add_child(_info)
 	var actions := HBoxContainer.new(); column.add_child(actions)
 	_move_button = _button("移动", func() -> void: _set_mode("move")); actions.add_child(_move_button)
-	_attack_button = _button("攻击", func() -> void: _set_mode("attack")); actions.add_child(_attack_button)
-	_guard_button = _button("防御", guard_selected); actions.add_child(_guard_button)
+	_attack_button = _button("攻击 %d" % Battle.ATTACK_COST, func() -> void: _set_mode("attack")); actions.add_child(_attack_button)
+	_guard_button = _button("防御 %d" % Battle.DEFEND_COST, guard_selected); actions.add_child(_guard_button)
+	_deploy_button = _button("部署小兵", func() -> void: _set_mode("deploy")); column.add_child(_deploy_button)
+	_territories = _label("", 12); column.add_child(_territories)
 	var scroll := ScrollContainer.new(); scroll.custom_minimum_size.y = 160
 	_squad_scroll = scroll
 	scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED; column.add_child(scroll)
@@ -118,7 +122,7 @@ func _build() -> void:
 	_end_button = _button("结束回合  [空格]", _end_or_restart, true); column.add_child(_end_button)
 	var fit := _button("查看全图", func() -> void: board.fit_board()); column.add_child(fit)
 	_log = _label("", 12); _log.custom_minimum_size.y = 42; column.add_child(_log)
-	var help := _label("左键选择／操作 · Tab 切换宠物\n右键或中键拖地图 · 滚轮缩放\n移动／攻击各 1 行动点，防御减伤 3\n占点每回合得分，先达 6 分或全灭获胜", 12); column.add_child(help)
+	var help := _label("左键选择／操作 · Tab 切换宠物\n右键或中键拖地图 · 滚轮缩放\n每方共享 %d 点；普通格 1、灌木 2\n攻击 %d 点；防御 %d 点，减伤 3\n宠物行动后，对方小兵各自动行动一次\n部署不耗点，小兵也参与夺区\n每区每轮 1 分，达到 %d 分并领先获胜\n消灭对方全部宠物也可获胜" % [Battle.TURN_AP, Battle.ATTACK_COST, Battle.DEFEND_COST, Battle.TARGET_SCORE], 12); column.add_child(help)
 	_roster_panel = _panel(); _content.add_child(_roster_panel)
 	var setup_scroll := ScrollContainer.new(); setup_scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
 	_roster_panel.add_child(setup_scroll)
@@ -128,7 +132,7 @@ func _build() -> void:
 	_roster_scroll = ScrollContainer.new(); _roster_scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
 	_roster_body.add_child(_roster_scroll)
 	_start_button = _button("开始对战", start_battle, true); _roster_body.add_child(_start_button)
-	_roster_body.add_child(_label("地图上◆为任务据点。未知区域隐藏地形，探索过的区域保留地形，视野之外的敌人不显示。\n胜利奖励：60 信用点 · 10 积分 · 20 玩家经验", 12))
+	_roster_body.add_child(_label("地图分为 R1–R9 九个区域。每方每回合共享 %d 行动点，并获得 1 个小兵部署名额。\n完整一轮结束时，只有一方单位的区域归该方控制；双方同在则争夺中、不产分。小兵也能夺区。\n未知地形和视野外的敌人隐藏，区域显示己方已知归属。\n胜利奖励：60 信用点 · 10 积分 · 20 玩家经验" % Battle.TURN_AP, 12))
 	board.visible = false; _sidebar.visible = false
 
 func _refresh_roster() -> void:
@@ -138,7 +142,7 @@ func _refresh_roster() -> void:
 		var pet: Dictionary = state.pets[index]
 		var profile: Array = Battle.PROFILES.get(pet.get("species", "dragon"), Battle.PROFILES.dragon)
 		var growth := clampi(int(pet.get("level", 1)) - 1, 0, 10)
-		var text := "%s %s · Lv.%d\n生命 %d · 移动 %d · 视野 %d · 射程 %d" % ["✓" if index in roster_indices else "○", pet.get("name", "宠物"), int(pet.get("level", 1)), int(profile[0]) + growth * 2, profile[1], profile[2], profile[3]]
+		var text := "%s %s · Lv.%d\n生命 %d · 视野 %d · 射程 %d" % ["✓" if index in roster_indices else "○", pet.get("name", "宠物"), int(pet.get("level", 1)), int(profile[0]) + growth * 2, profile[2], profile[3]]
 		var button := _button(text, _toggle_roster.bind(index), index in roster_indices)
 		button.disabled = float(pet.get("health", 0)) <= 0
 		button.tooltip_text = "需要先恢复健康" if button.disabled else "点击加入或移出战队"
@@ -165,7 +169,7 @@ func start_battle() -> void:
 	started = true; settled = false; leave_pending = false; _enemy_delay = 0
 	_roster_panel.visible = false; board.visible = true; _sidebar.visible = true
 	selected_id = 0; action_mode = "move"
-	_message = "选择宠物，再点蓝色格移动；攻击模式点可见敌人。"
+	_message = "全队共享 %d 行动点。选择宠物移动，或部署小兵到绿色格。" % Battle.TURN_AP
 	_layout(); _refresh_battle()
 	board.fit_board()
 
@@ -209,48 +213,68 @@ func _fit_after_layout() -> void:
 
 func select_unit(id: int, focus := false) -> void:
 	var unit := battle.get_unit(id)
-	if unit.is_empty() or unit.side != "ally" or unit.hp <= 0: return
+	if unit.is_empty() or unit.side != "ally" or unit.hp <= 0 or unit.get("kind", "pet") != "pet": return
 	selected_id = id; leave_pending = false
 	if focus: board.focus_cell(unit.cell)
 	_refresh_battle()
 
 func _set_mode(mode: String) -> void:
 	action_mode = mode
-	_message = "点蓝色格移动" if mode == "move" else "点视野内且在射程中的敌人攻击"
+	match mode:
+		"move": _message = "点蓝色格移动，悬停可查看预计点数"
+		"attack": _message = "点视野内且在射程中的敌人攻击，消耗 %d 点" % Battle.ATTACK_COST
+		"deploy": _message = "点绿色空格部署小兵：仅限己方控制区域内的可见空地"
 	_refresh_battle()
 
 func _cell_clicked(cell: Vector2i) -> void:
-	if not started or battle.phase != "player": return
+	if not started or battle.phase != "player" or battle.has_pending_reactions(): return
 	leave_pending = false
+	if action_mode == "deploy":
+		var deployed := battle.deploy_soldier("ally", cell)
+		_message = "小兵已部署，将在敌方每次宠物行动后自动行动，也可夺取区域" if deployed.ok else deployed.error
+		if deployed.ok and int(battle.deploy_budget.ally) <= 0: action_mode = "move"
+		_refresh_battle(); return
 	var occupant := battle.unit_at(cell)
-	if not occupant.is_empty() and occupant.side == "ally": select_unit(occupant.id); return
+	if not occupant.is_empty() and occupant.side == "ally":
+		if occupant.get("kind", "pet") == "pet": select_unit(occupant.id)
+		else:
+			_message = "我方小兵 · HP %d/%d · 自动移动 %d 格 · 伤害 %d；不能手动控制" % [occupant.hp, occupant.max_hp, occupant.move, occupant.damage]
+			_refresh_battle()
+		return
 	var result: Dictionary
 	if action_mode == "attack":
 		result = battle.attack_unit(selected_id, cell)
-		_message = "造成 %d 伤害%s" % [result.damage, "，敌人倒下" if result.get("defeated", false) else ""] if result.ok else result.error
+		_message = "消耗 %d 点，造成 %d 伤害%s" % [Battle.ATTACK_COST, result.damage, "，敌人倒下" if result.get("defeated", false) else ""] if result.ok else result.error
 	else:
 		board.preview_path = battle.path_to(selected_id, cell)
 		result = battle.move_unit(selected_id, cell)
-		_message = (result.get("error", "") if not str(result.get("error", "")).is_empty() else "移动完成，视野已更新") if result.ok else result.error
+		_message = "移动消耗 %d 点%s" % [result.cost, "；" + result.error if not str(result.get("error", "")).is_empty() else "，视野已更新"] if result.ok else result.error
+	if battle.has_pending_reactions(): _enemy_delay = 0.25
 	_refresh_battle()
 
 func _cell_hovered(cell: Vector2i) -> void:
-	if not started or battle.phase != "player": return
+	if not started or battle.phase != "player" or battle.has_pending_reactions(): return
 	if action_mode == "move": board.preview_path = battle.path_to(selected_id, cell)
 	else: board.preview_path.clear()
 	_log.text = _message
+	if action_mode == "move" and not board.preview_path.is_empty():
+		var cost := battle.movement_cost(selected_id, cell)
+		_log.text = "预计移动消耗 %d 点 · 剩余 %d 点\n未探索地形按普通格估计，遇阻只扣实际路程" % [cost, int(battle.action_points.ally) - cost]
+	elif action_mode == "deploy" and board.deployment_cells.has(cell):
+		_log.text = "%s · 点击部署小兵，不消耗行动点" % battle.region_at(cell).name
 	var target := battle.unit_at(cell)
 	if not target.is_empty() and target.side == "enemy" and battle.visible_cells.has(cell):
 		_log.text = "%s · HP %d/%d · 射程 %d · 伤害 %d%s" % [target.name, target.hp, target.max_hp, target.range, target.damage, " · 防御中" if target.guard else ""]
 	if action_mode == "attack":
 		var result := battle.attack_preview(selected_id, cell)
-		if result.ok: _log.text += "\n预计伤害 %d，点击攻击" % result.damage
+		if result.ok: _log.text += "\n预计伤害 %d · 消耗 %d 点，点击攻击" % [result.damage, Battle.ATTACK_COST]
 		elif not target.is_empty() and battle.visible_cells.has(cell): _log.text += "\n" + result.error
 	board.queue_redraw()
 
 func guard_selected() -> void:
 	var result := battle.defend_unit(selected_id)
-	_message = "进入防御，本次敌方回合受到的伤害减少 3" if result.ok else result.error
+	_message = "消耗 %d 点进入防御，受到的伤害减少 3" % Battle.DEFEND_COST if result.ok else result.error
+	if battle.has_pending_reactions(): _enemy_delay = 0.25
 	_refresh_battle()
 
 func end_turn() -> void:
@@ -259,10 +283,10 @@ func end_turn() -> void:
 	_refresh_battle()
 
 func _process(delta: float) -> void:
-	if not visible or not started or battle.phase != "enemy": return
+	if not visible or not started or (battle.phase != "enemy" and not battle.has_pending_reactions()): return
 	_enemy_delay -= delta
 	if _enemy_delay > 0: return
-	var result := battle.step_enemy()
+	var result := battle.step_reaction() if battle.has_pending_reactions() else battle.step_enemy()
 	_enemy_delay = 0.4 if result.get("visible", false) else 0.10
 	if result.get("visible", false) and not str(result.get("message", "")).is_empty(): _message = result.message
 	_refresh_battle()
@@ -270,25 +294,36 @@ func _process(delta: float) -> void:
 func _refresh_battle() -> void:
 	if not started: return
 	var names := {"player": "我方行动", "enemy": "敌方行动", "won": "战斗胜利", "lost": "战斗失利"}
-	_status.text = "第 %d 回合 · %s · 我方 %d/%d — 敌方 %d/%d" % [battle.round_number, names[battle.phase], battle.score_ally, Battle.TARGET_SCORE, battle.score_enemy, Battle.TARGET_SCORE]
+	var phase_name: String = "小兵响应中" if battle.has_pending_reactions() else names[battle.phase]
+	_status.text = "第 %d 回合 · %s · 胜利分 我方 %d — 敌方 %d / %d\n共享行动点 我方 %d/%d · 敌方 %d/%d" % [battle.round_number, phase_name, battle.score_ally, battle.score_enemy, Battle.TARGET_SCORE, battle.action_points.ally, Battle.TURN_AP, battle.action_points.enemy, Battle.TURN_AP]
 	var unit := battle.get_unit(selected_id)
 	if not unit.is_empty():
-		_info.text = "%s · HP %d/%d · 行动 %d\n移动 %d · 视野 %d · 射程 %d · 伤害 %d%s" % [unit.name, unit.hp, unit.max_hp, unit.ap, unit.move, unit.sight, unit.range, unit.damage, "\n防御中" if unit.guard else ""]
+		_info.text = "%s · HP %d/%d\n视野 %d · 射程 %d · 伤害 %d%s" % [unit.name, unit.hp, unit.max_hp, unit.sight, unit.range, unit.damage, " · 防御中" if unit.guard else ""]
+	var region_lines: Array[String] = []
+	var owners := {"neutral": "中立", "ally": "我方", "enemy": "敌方"}
+	for region in battle.regions:
+		var record: Dictionary = battle.region_memory.get(region.id, {})
+		region_lines.append("%s %s" % [region.name, "未知" if record.is_empty() else ("争夺" if record.get("contested", false) else owners[record.get("owner", "neutral")])])
+	_territories.text = "区域归属（己方已知）\n%s\n%s\n%s" % [" · ".join(region_lines.slice(0, 3)), " · ".join(region_lines.slice(3, 6)), " · ".join(region_lines.slice(6, 9))]
 	board.selected_id = selected_id
 	board.reachable = battle.reachable_cells(selected_id) if action_mode == "move" else {}
+	board.deployment_cells = battle.deployment_cells("ally") if action_mode == "deploy" else {}
 	board.preview_path.clear(); board.queue_redraw()
 	for child in _squad_buttons.get_children(): _squad_buttons.remove_child(child); child.queue_free()
 	for ally in battle.units:
-		if ally.side != "ally": continue
-		var button := _button("%s · HP %d/%d · 行动 %d%s" % [ally.name, ally.hp, ally.max_hp, ally.ap, " ✓" if ally.id == selected_id else ""], select_unit.bind(ally.id, true), ally.id == selected_id)
+		if ally.side != "ally" or ally.get("kind", "pet") != "pet": continue
+		var button := _button("%s · HP %d/%d%s" % [ally.name, ally.hp, ally.max_hp, " ✓" if ally.id == selected_id else ""], select_unit.bind(ally.id, true), ally.id == selected_id)
 		button.disabled = ally.hp <= 0; _squad_buttons.add_child(button)
 	_squad_scroll.custom_minimum_size.y = minf(180, _squad_buttons.get_child_count() * 48)
-	var can_act: bool = battle.phase == "player" and not unit.is_empty() and unit.hp > 0 and unit.ap > 0
-	_move_button.disabled = battle.phase != "player" or (not can_act and (unit.is_empty() or int(unit.get("stride", 0)) <= 0))
-	_attack_button.disabled = not can_act; _guard_button.disabled = not can_act or unit.get("guard", false)
+	var can_act: bool = battle.phase == "player" and not battle.has_pending_reactions() and not unit.is_empty() and unit.hp > 0 and int(battle.action_points.ally) > 0
+	_move_button.disabled = not can_act
+	_attack_button.disabled = not can_act or int(battle.action_points.ally) < Battle.ATTACK_COST
+	_guard_button.disabled = not can_act or int(battle.action_points.ally) < Battle.DEFEND_COST or unit.get("guard", false)
 	_move_button.text = "移动 ✓" if action_mode == "move" else "移动"
-	_attack_button.text = "攻击 ✓" if action_mode == "attack" else "攻击"
-	_end_button.disabled = battle.phase != "player"
+	_attack_button.text = "攻击 %d%s" % [Battle.ATTACK_COST, " ✓" if action_mode == "attack" else ""]
+	_deploy_button.text = "部署小兵 · 剩余 %d%s" % [battle.deploy_budget.ally, " ✓" if action_mode == "deploy" else ""]
+	_deploy_button.disabled = battle.phase != "player" or battle.has_pending_reactions() or int(battle.deploy_budget.ally) <= 0
+	_end_button.disabled = battle.phase != "player" or battle.has_pending_reactions()
 	if battle.phase in ["won", "lost"]:
 		_message = "胜利！奖励：60 信用点、10 积分、20 玩家经验。" if battle.phase == "won" else "本局结束。宠物会安全返回房间，可以重新编队挑战。"
 		if not settled:
@@ -327,7 +362,7 @@ func _unhandled_key_input(event: InputEvent) -> void:
 			if not started: return
 			var allies: Array[int] = []
 			for unit in battle.units:
-				if unit.side == "ally" and unit.hp > 0: allies.append(unit.id)
+				if unit.side == "ally" and unit.hp > 0 and unit.get("kind", "pet") == "pet": allies.append(unit.id)
 			if not allies.is_empty(): select_unit(allies[(allies.find(selected_id) + 1) % allies.size()], true)
 		_: return
 	get_viewport().set_input_as_handled()
