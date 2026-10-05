@@ -23,7 +23,18 @@ func _new_battle(pet_count: int = 2) -> RefCounted:
 		save_pets.append({"species":"goose", "name":"测试鹅%d" % i, "health":100, "energy":75, "level":1})
 	var battle = BattleState.new()
 	battle.setup(save_pets, catalog)
+	# 多数 domain 测试只添加所需小兵；开局编制由前线测试单独验证。
+	var keep: Array[Dictionary] = []
+	for unit: Dictionary in battle.units:
+		if unit.get("kind", "pet") != "soldier": keep.append(unit)
+	battle.units = keep
 	return battle
+
+func _enemy_until_player(battle: Variant) -> void:
+	var guard := 0
+	while battle.phase == "enemy" and not battle.round_done.enemy and guard < 100:
+		battle.step_enemy()
+		guard += 1
 
 func _side_units(battle: Variant, side: String) -> Array[Dictionary]:
 	var found: Array[Dictionary] = []
@@ -55,13 +66,23 @@ func _hold_enemy_pets(battle: Variant) -> void:
 
 func _finish_enemy_phase(battle: Variant) -> void:
 	var guard := 0
-	while battle.phase == "enemy" and guard < 200:
-		battle.step_enemy()
+	var starting_round: int = battle.round_number
+	while battle.phase not in ["won", "lost"] and battle.round_number == starting_round and guard < 200:
+		if battle.phase == "enemy":
+			battle.step_enemy()
+		elif battle.phase == "player" and not battle.round_done.ally:
+			battle.end_player_turn()
 		guard += 1
 
 func _finish_full_round(battle: Variant) -> void:
-	if battle.phase == "player": battle.end_player_turn()
-	_finish_enemy_phase(battle)
+	var starting_round: int = battle.round_number
+	var guard := 0
+	while battle.phase not in ["won", "lost"] and battle.round_number == starting_round and guard < 200:
+		if battle.phase == "player" and not battle.round_done.ally:
+			battle.end_player_turn()
+		elif battle.phase == "enemy":
+			battle.step_enemy()
+		guard += 1
 
 func _run() -> void:
 	catalog = _load_catalog()
@@ -94,7 +115,7 @@ func _test_setup_copies_pets() -> void:
 	var before := pets.duplicate(true)
 	var battle := BattleState.new()
 	battle.setup(pets, catalog)
-	_check(_side_units(battle, "ally").size() == 4, "只从存档复制最多四只宠物进入战斗")
+	_check(_side_units(battle, "ally").filter(func(unit: Dictionary): return unit.get("kind", "pet") == "pet").size() == 4, "只从存档复制最多四只宠物进入战斗")
 	_check(pets == before, "战斗初始化不得改动存档中的宠物数据")
 	if not battle.units.is_empty():
 		battle.units[0].hp = 1
@@ -139,6 +160,7 @@ func _test_map_and_movement() -> void:
 	var move_result: Dictionary = battle.move_unit(int(ally.id), Vector2i(3, 1))
 	_check(move_result.get("ok", false) and move_result.get("cost", -1) == 3, "移动应按实际路径扣除灌木2点和普通格1点")
 	_check(battle.action_points.ally == BattleState.TURN_AP - 3, "路径移动费用应从己方共享行动点池扣除")
+	_enemy_until_player(battle)
 	var long_move: Dictionary = battle.move_unit(int(ally.id), Vector2i(23, 1))
 	_check(long_move.get("ok", false) and long_move.get("cost", -1) == 20, "玩家宠物应能一次走完超出profile.move的实际长路径")
 	_check(battle.action_points.ally == 1, "长路径继续从同一共享行动点池扣费")
@@ -164,6 +186,7 @@ func _test_combat_and_visibility() -> void:
 	_check(not too_far.get("ok", false), "超出技能射程的目标应拒绝")
 	var unknown_skill: Dictionary = battle.cast_skill(int(ally.id), "not_learned", enemy.cell)
 	_check(not unknown_skill.get("ok", false) and battle.action_points.ally == BattleState.TURN_AP - 4 and ally.charge == 1, "未学习技能应拒绝且不扣行动点或充能")
+	_enemy_until_player(battle)
 	var defender := _unit(battle, "ally", 1)
 	var defense: Dictionary = battle.defend_unit(int(defender.id))
 	_check(defense.get("ok", false) and defense.get("cost", -1) == BattleState.DEFEND_COST and battle.action_points.ally == BattleState.TURN_AP - 6, "防御应花费共享池2点行动点")
@@ -297,6 +320,7 @@ func _test_shared_action_points() -> void:
 	var spend: Dictionary = battle.move_unit(int(first.id), Vector2i(11, 1))
 	_check(spend.get("ok", false) and spend.get("cost", -1) == 10, "第一只宠物应能为共享池分配十点移动")
 	_check(battle.action_points.ally == 14 and not battle.reachable_cells(int(second.id)).has(far_cell), "一只寵物的移動应立即缩小另一只宠物的可达范围")
+	_enemy_until_player(battle)
 	var remaining_use: Dictionary = battle.move_unit(int(second.id), remaining_cell)
 	_check(remaining_use.get("ok", false) and remaining_use.get("cost", -1) == 14, "另一只宠物应能使用行动池里剩余的14点")
 	_check(battle.action_points.ally == 0, "任意宠物消耗都应共同扣减至零")
@@ -321,12 +345,12 @@ func _test_regions_and_scoring() -> void:
 	battle.refresh_visibility()
 	_check(neutral_region.owner == "neutral", "进入中立区后不能即时改变区域归属")
 	_finish_full_round(battle)
-	_check(battle.phase == "player", "完整敌方回合结束后应开始新回合")
+	_check(battle.round_number == 2 and battle.round_starter == "enemy" and battle.phase == "enemy", "完整双方机会后应进入交替先手的新轮")
 	_check(neutral_region.owner == "ally", "只由己方存活单位占据的区域应在完整轮结束时捕获")
 	_check(empty_enemy_region.owner == "enemy", "无单位区域应保留此前owner")
 	_check(battle.score_ally >= 1 and battle.score_enemy >= 1, "每个完整双方回合应按区域owner结算得分")
-	_check(battle.action_points.ally == BattleState.TURN_AP, "新己方回合开始时共享行动点应重置")
-	_check(battle.deploy_budget.ally == 2 and battle.deploy_budget.enemy == 1, "新回合應增加雙方部署預算，敵方已用部署預算應補回")
+	_check(battle.action_points.ally == BattleState.TURN_AP and battle.action_points.enemy == BattleState.TURN_AP, "完整轮结算后双方共享行动点一起重置")
+	_check(battle.deploy_budget.ally == 2 and battle.deploy_budget.enemy == 1, "新轮增加部署预算后敌方已用掉的名额相抵")
 
 	var contest := _new_battle(2)
 	_ground(contest); _hold_enemy_pets(contest)
@@ -368,12 +392,12 @@ func _test_regions_and_scoring() -> void:
 	for region: Dictionary in scoring.regions:
 		var center: Vector2i = region.rect.position + region.rect.size / 2
 		scoring.units.append(_soldier(next_id, "ally", center)); next_id += 1
+	for foe: Dictionary in scoring_enemies:
+		foe.hp = 1000; foe.max_hp = 1000
 	scoring.refresh_visibility()
 	var rounds := 0
-	while scoring.phase == "player" and scoring.score_ally < BattleState.TARGET_SCORE and rounds < 5:
-		scoring.end_player_turn()
-		scoring.action_points.enemy = 0
-		_finish_enemy_phase(scoring)
+	while scoring.phase not in ["won", "lost"] and scoring.score_ally < BattleState.TARGET_SCORE and rounds < 40:
+		_finish_full_round(scoring)
 		rounds += 1
 	_check(BattleState.TARGET_SCORE == 30, "胜利目标应为30分")
 	_check(scoring.phase == "won" and scoring.score_ally >= BattleState.TARGET_SCORE, "区域控制应通过完整轮计分达到30分获胜")
@@ -436,6 +460,7 @@ func _test_reactions() -> void:
 	# 小兵响应一次、无AP递归并在处理期间锁定宠物操作。
 	var battle := _new_battle(2)
 	_ground(battle)
+	battle.deploy_budget.enemy = 0
 	var actor := _unit(battle, "ally", 0)
 	_put(actor, Vector2i(5, 5))
 	var first_soldier := _soldier(8100, "enemy", Vector2i(6, 5))
@@ -458,6 +483,7 @@ func _test_reactions() -> void:
 	_check(seen_reactions.size() == 2 and seen_reactions.has(first_soldier.id) and seen_reactions.has(second_soldier.id), "对方每只存活小兵应各响应一次")
 	_check(not battle.has_pending_reactions(), "小兵响应不能递归触发新响应")
 	_check(battle.action_points.ally == points_before_block and battle.action_points.enemy == enemy_points_before_reactions, "小兵响应不得消耗任一方共享行动点")
+	_enemy_until_player(battle)
 	var target := _unit(battle, "enemy")
 	_put(target, Vector2i(6, 5)); actor.range = 2
 	battle.refresh_visibility()
@@ -470,7 +496,7 @@ func _test_reactions() -> void:
 		battle.step_reaction()
 		attack_reactions += 1
 	_check(attack_reactions == 2 and battle.action_points.ally == attack_points_ally and battle.action_points.enemy == attack_points_enemy, "攻击响应应每只小兵一次且不扣共享行动点")
-	var move_actor := _unit(battle, "ally", 1)
+	_enemy_until_player(battle)
 	var after_reaction: Dictionary = battle.move_unit(int(_unit(battle, "ally", 1).id), Vector2i(3, 3))
 	_check(after_reaction.get("ok", false) and battle.has_pending_reactions(), "宠物移动成功后应再次排入对方小兵响应")
 	var move_points_ally: int = battle.action_points.ally
@@ -531,7 +557,7 @@ func _test_enemy_shared_action_points() -> void:
 	for foe: Dictionary in foes: foe.sight = 0
 	for ally: Dictionary in _side_units(battle, "ally"): ally.sight = 0
 	battle.refresh_visibility()
-	_check(battle.end_player_turn() and battle.action_points.enemy == BattleState.TURN_AP, "敵方自己的回合开始时应重置共享点数")
+	_check(battle.end_player_turn() and battle.action_points.enemy == BattleState.TURN_AP, "结束己方机会后应保持敌方共享池不被提前重置")
 	var start_points: int = battle.action_points.enemy
 	var first: Dictionary = battle.step_enemy()
 	var after_first: int = battle.action_points.enemy
@@ -540,10 +566,8 @@ func _test_enemy_shared_action_points() -> void:
 	_check(first.get("actor_id", -1) != second.get("actor_id", -1), "敌方宠物应轮流获得行动机会")
 	_check(after_first < start_points and after_second < after_first, "敌方宠物行动应共同消耗敌方共享池")
 	_finish_enemy_phase(battle)
-	_check(battle.phase == "player", "敌方共享池消耗完后应结束敌方回合")
-	var ally := _unit(battle, "ally")
-	battle.action_points.ally = 1
-	_check(battle.end_player_turn() and battle.action_points.enemy == BattleState.TURN_AP, "下一次敌方回合开始应重新获得完整共享行动点")
+	_check(battle.round_number == 2 and battle.round_starter == "enemy" and battle.phase == "enemy", "敌方完成共享池后应公平交替先手并开启新轮")
+	_check(battle.action_points.ally == BattleState.TURN_AP and battle.action_points.enemy == BattleState.TURN_AP, "新轮开始时双方共享行动点一起重置")
 
 func _test_terminal_input_lock() -> void:
 	var battle := _new_battle(1)

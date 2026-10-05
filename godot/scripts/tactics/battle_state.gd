@@ -34,15 +34,17 @@ var enemy_memory: Dictionary = {}
 var last_seen_enemies: Dictionary = {}
 var action_points := {"ally": TURN_AP, "enemy": TURN_AP}
 var deploy_budget := {"ally": 1, "enemy": 1}
+var round_done := {"ally": false, "enemy": false}
+var round_starter := "ally"
 var phase := "player"
 var round_number := 1
 var score_ally := 0
 var score_enemy := 0
 var _enemy_order: Array[int] = []
-var _enemy_finished: Dictionary = {}
 var _enemy_cursor := 0
 var _enemy_deployment_pending := false
 var _reaction_order: Array[int] = []
+var _handoff_pending := ""
 var _next_soldier_id := 1000
 
 func setup(pets: Array, _catalog: Dictionary) -> void:
@@ -54,8 +56,9 @@ func setup(pets: Array, _catalog: Dictionary) -> void:
 	phase = "player"; round_number = 1; score_ally = 0; score_enemy = 0
 	action_points = {"ally": TURN_AP, "enemy": TURN_AP}
 	deploy_budget = {"ally": 1, "enemy": 1}; _next_soldier_id = 1000
-	_enemy_order.clear(); _enemy_finished.clear(); _enemy_cursor = 0
-	_enemy_deployment_pending = false; _reaction_order.clear()
+	round_done = {"ally": false, "enemy": false}; round_starter = "ally"
+	_enemy_order.clear(); _enemy_cursor = 0
+	_enemy_deployment_pending = true; _reaction_order.clear(); _handoff_pending = ""
 	var level_sum := 0
 	for index in mini(pets.size(), 4):
 		var pet: Dictionary = pets[index]
@@ -68,7 +71,9 @@ func setup(pets: Array, _catalog: Dictionary) -> void:
 		var species: String = ["goose", "cat", "dragon", "gpt", "whale", "gemini"][index]
 		var unit := _make_unit(100 + index, "enemy", species, "对手%d" % (index + 1), average_level, Map.ENEMY_SPAWNS[index])
 		unit.hp = maxi(12, unit.hp - 8); unit.max_hp = unit.hp
-		unit.damage = maxi(3, unit.damage - 2); units.append(unit)
+		unit.damage = maxi(3, unit.damage - 2); units.append(unit); _enemy_order.append(unit.id)
+	for cell in Map.ALLY_FRONTLINE_SPAWNS: _add_soldier("ally", cell)
+	for cell in Map.ENEMY_FRONTLINE_SPAWNS: _add_soldier("enemy", cell)
 	region_at(Map.ALLY_SPAWNS[0]).owner = "ally"
 	region_at(Map.ENEMY_SPAWNS[0]).owner = "enemy"
 	refresh_visibility()
@@ -139,7 +144,7 @@ func _movement_search(unit: Dictionary, goal := Vector2i(-1, -1), unlimited := f
 	return {"costs": costs, "parents": parents}
 
 func _can_act(unit: Dictionary) -> bool:
-	return not unit.is_empty() and unit.hp > 0 and unit.get("kind", "pet") == "pet" and not has_pending_reactions() and phase == ("player" if unit.side == "ally" else "enemy")
+	return not unit.is_empty() and unit.hp > 0 and unit.get("kind", "pet") == "pet" and not round_done.get(unit.side, true) and not has_pending_reactions() and _handoff_pending.is_empty() and phase == ("player" if unit.side == "ally" else "enemy")
 
 func reachable_cells(id: int) -> Dictionary:
 	var unit := get_unit(id)
@@ -183,7 +188,7 @@ func move_unit(id: int, destination: Vector2i) -> Dictionary:
 	var result := _walk_path(unit, path, int(action_points[unit.side]))
 	result["error"] = "前方受阻，请重新规划" if not result.ok else ("遭遇障碍，仅扣实际走过的点数" if result.interrupted else "")
 	if result.ok:
-		action_points[unit.side] -= int(result.cost); _queue_reactions(unit.side)
+		action_points[unit.side] -= int(result.cost); _complete_pet_action(unit.side)
 	return result
 
 func _attack_check(unit: Dictionary, target_cell: Vector2i) -> Dictionary:
@@ -283,7 +288,7 @@ func cast_skill(id: int, skill_id: String, target_cell: Vector2i) -> Dictionary:
 	result["defeated"] = unit_at(target_cell).is_empty()
 	result["charge"] = unit.charge
 	# 范围技能可伤及隐藏敌军，预览和战报仅返回施法前已见敌军，不能泄露数量或属性。
-	refresh_visibility(); _check_elimination(); _queue_reactions(unit.side)
+	refresh_visibility(); _check_elimination(); _complete_pet_action(unit.side)
 	return result
 
 func _apply_attack(unit: Dictionary, target_cell: Vector2i, result: Dictionary) -> void:
@@ -295,27 +300,60 @@ func _apply_attack(unit: Dictionary, target_cell: Vector2i, result: Dictionary) 
 func defend_unit(id: int) -> Dictionary:
 	var unit := get_unit(id)
 	if not _can_act(unit) or int(action_points[unit.side]) < DEFEND_COST or unit.guard: return {"ok": false, "error": "防御需要 %d 行动点，且不能重复防御" % DEFEND_COST}
-	action_points[unit.side] -= DEFEND_COST; unit.guard = true; _queue_reactions(unit.side)
+	action_points[unit.side] -= DEFEND_COST; unit.guard = true; _complete_pet_action(unit.side)
 	return {"ok": true, "error": "", "cost": DEFEND_COST}
 
 func deployment_cells(side: String) -> Dictionary:
 	var cells: Dictionary = {}
-	if side not in ["ally", "enemy"] or phase != ("player" if side == "ally" else "enemy") or has_pending_reactions() or int(deploy_budget[side]) <= 0: return cells
+	if side not in ["ally", "enemy"] or round_done[side] or phase != ("player" if side == "ally" else "enemy") or has_pending_reactions() or not _handoff_pending.is_empty() or int(deploy_budget[side]) <= 0: return cells
 	for region in regions:
-		if region.owner != side: continue
+		# 部署高亮使用己方已知归属和争夺状态，不能借隐藏驻军泄露信息。
+		var known: Dictionary = _regions_for(side).get(region.id, {})
+		if known.get("owner", "neutral") != side or known.get("contested", false): continue
 		for cell: Vector2i in _sight_for(side):
 			if region.rect.has_point(cell) and _walkable(cell) and unit_at(cell).is_empty(): cells[cell] = true
 	return cells
 
 func deploy_soldier(side: String, cell: Vector2i) -> Dictionary:
-	if not deployment_cells(side).has(cell): return {"ok": false, "error": "请在己方控制区域内的可见空地部署小兵"}
-	var soldier := {"id": _next_soldier_id, "kind": "soldier", "side": side, "cell": cell, "name": "我方小兵" if side == "ally" else "敌方小兵", "species": "goose", "level": 1, "hp": SOLDIER_HEALTH, "max_hp": SOLDIER_HEALTH, "move": SOLDIER_MOVE, "sight": SOLDIER_SIGHT, "range": 1, "damage": SOLDIER_DAMAGE, "guard": false, "pet_index": -1}
-	_next_soldier_id += 1; units.append(soldier); deploy_budget[side] -= 1
+	if not deployment_cells(side).has(cell): return {"ok": false, "error": "请在己方稳定控制区域内的可见空地增援小兵"}
+	var region := region_at(cell)
+	if region.is_empty() or region.owner != side or region.contested: return {"ok": false, "error": "该区域暂时无法增援，请确认控制稳定"}
+	var soldier := _add_soldier(side, cell)
+	deploy_budget[side] -= 1
 	refresh_visibility()
 	return {"ok": true, "id": soldier.id, "error": ""}
 
+func _add_soldier(side: String, cell: Vector2i) -> Dictionary:
+	var soldier := {"id": _next_soldier_id, "kind": "soldier", "side": side, "cell": cell, "name": "我方小兵" if side == "ally" else "敌方小兵", "species": "goose", "level": 1, "hp": SOLDIER_HEALTH, "max_hp": SOLDIER_HEALTH, "move": SOLDIER_MOVE, "sight": SOLDIER_SIGHT, "range": 1, "damage": SOLDIER_DAMAGE, "guard": false, "pet_index": -1}
+	_next_soldier_id += 1; units.append(soldier)
+	return soldier
+
 func has_pending_reactions() -> bool:
 	return not _reaction_order.is_empty()
+
+func _complete_pet_action(side: String) -> void:
+	if phase in ["won", "lost"]: return
+	if int(action_points[side]) <= 0: round_done[side] = true
+	_handoff_pending = side
+	_queue_reactions(side)
+	if not has_pending_reactions(): _handoff_after_reactions()
+
+func _handoff_after_reactions() -> void:
+	if _handoff_pending.is_empty() or has_pending_reactions() or phase in ["won", "lost"]: return
+	var side := _handoff_pending
+	_handoff_pending = ""
+	_pass_initiative(side)
+
+func _pass_initiative(side: String) -> void:
+	# 一个指令只交出操作权，不重置点数，也不结算区域；整轮双方结束才统一结算。
+	for team in ["ally", "enemy"]:
+		if int(action_points[team]) <= 0: round_done[team] = true
+	if round_done.ally and round_done.enemy:
+		_finish_round()
+		return
+	var other := "enemy" if side == "ally" else "ally"
+	var next_side: String = other if not round_done[other] else side
+	phase = "player" if next_side == "ally" else "enemy"
 
 func _queue_reactions(acting_side: String) -> void:
 	if phase in ["won", "lost"]: return
@@ -325,10 +363,11 @@ func _queue_reactions(acting_side: String) -> void:
 
 func step_reaction() -> Dictionary:
 	if not has_pending_reactions() or phase in ["won", "lost"]: return {"ok": false, "visible": false, "message": ""}
-	var unit := get_unit(_reaction_order.pop_front())
-	if unit.is_empty() or unit.hp <= 0: return {"ok": true, "visible": false, "message": "", "skipped": true}
-	var result := _soldier_action(unit)
-	result["reaction"] = true; result["actor_id"] = unit.id
+	var actor_id: int = _reaction_order.pop_front()
+	var unit := get_unit(actor_id)
+	var result := {"ok": true, "visible": false, "message": "", "skipped": true} if unit.is_empty() or unit.hp <= 0 else _soldier_action(unit)
+	result["reaction"] = true; result["actor_id"] = actor_id
+	if not has_pending_reactions(): _handoff_after_reactions()
 	return result
 
 func has_line_of_sight(from: Vector2i, to: Vector2i) -> bool:
@@ -410,15 +449,12 @@ func _check_elimination() -> void:
 		else: enemies += 1
 	if allies == 0: phase = "lost"
 	elif enemies == 0: phase = "won"
-	if phase in ["won", "lost"]: _reaction_order.clear()
+	if phase in ["won", "lost"]: _reaction_order.clear(); _handoff_pending = ""
 
 func end_player_turn() -> bool:
-	if phase != "player" or has_pending_reactions(): return false
-	phase = "enemy"; _enemy_cursor = 0; _enemy_order.clear(); _enemy_finished.clear()
-	_enemy_deployment_pending = true; action_points.enemy = TURN_AP
-	for unit in units:
-		if unit.side == "enemy" and unit.hp > 0 and unit.get("kind", "pet") == "pet":
-			unit.guard = false; _enemy_order.append(unit.id)
+	if phase != "player" or round_done.ally or has_pending_reactions() or not _handoff_pending.is_empty(): return false
+	round_done.ally = true
+	_pass_initiative("ally")
 	return true
 
 func _visible_targets(unit: Dictionary) -> Array[Dictionary]:
@@ -475,12 +511,23 @@ func _soldier_action(unit: Dictionary) -> Dictionary:
 			_apply_attack(unit, target.cell, attack)
 			var observed: bool = seen_before or target.side == "ally"
 			return {"ok": true, "action": "attack", "visible": observed, "message": "%s 响应攻击 %s，造成 %d 伤害" % [unit.name, target.name, attack.damage] if observed else ""}
-	var path := _advance_path(unit, _goal_for(unit, targets), int(unit.move))
+	var path := _advance_path(unit, _soldier_goal(unit, targets), int(unit.move))
 	if not path.is_empty():
 		var result := _walk_path(unit, path, int(unit.move))
 		var observed: bool = seen_before or visible_cells.has(unit.cell)
 		return {"ok": true, "action": "move" if result.ok else "hold", "visible": observed, "message": "%s 自动推进" % unit.name if result.ok and observed else ("%s 守住区域" % unit.name if observed else "")}
 	return {"ok": true, "action": "hold", "visible": seen_before, "message": "%s 守住区域" % unit.name if seen_before else ""}
+
+func _soldier_goal(unit: Dictionary, targets: Array[Dictionary]) -> Vector2i:
+	if not targets.is_empty(): return targets[0].cell
+	# 小兵沿所在横向路线形成前线；宠物仍可分兵夺区，小兵不因队友先入区而散开。
+	var rally := Vector2i(Map.SIZE.x / 2 - (1 if unit.side == "ally" else 0), unit.cell.y)
+	var region := region_at(rally)
+	var known: Dictionary = _regions_for(unit.side).get(region.id, {})
+	if known.get("owner", "neutral") == unit.side and not known.get("contested", false):
+		var enemy_front: Vector2i = Map.ENEMY_FRONTLINE_SPAWNS[0] if unit.side == "ally" else Map.ALLY_FRONTLINE_SPAWNS[0]
+		return Vector2i(enemy_front.x, unit.cell.y)
+	return rally
 
 func _deploy_enemy_soldier() -> Dictionary:
 	var cells := deployment_cells("enemy")
@@ -492,7 +539,7 @@ func _deploy_enemy_soldier() -> Dictionary:
 	return deploy_soldier("enemy", chosen) if chosen.x >= 0 else {"ok": false}
 
 func step_enemy() -> Dictionary:
-	if phase != "enemy": return {"ok": false, "error": "敌方回合尚未开始"}
+	if phase != "enemy": return {"ok": false, "error": "当前不是敌方指令"}
 	if has_pending_reactions(): return step_reaction()
 	if _enemy_deployment_pending:
 		var deployed := _deploy_enemy_soldier()
@@ -501,36 +548,38 @@ func step_enemy() -> Dictionary:
 			var observed := visible_cells.has(soldier.cell)
 			return {"ok": true, "action": "deploy", "visible": observed, "message": "敌方部署了小兵" if observed else ""}
 		_enemy_deployment_pending = false
-	if int(action_points.enemy) <= 0:
-		_finish_round()
-		return {"ok": true, "action": "round", "message": "区域已结算，新的回合开始", "visible": true}
-	# 轮流给敌方宠物下指令，避免共享行动点被第一只宠物全部占用。
-	var unit: Dictionary = {}
+	if int(action_points.enemy) <= 0 or round_done.enemy: return _end_enemy_round()
+	# 每次机会只下一个成功指令；轮流选择宠物，不把卡住的宠物永久排除。
 	for index in _enemy_order.size():
-		var candidate := get_unit(_enemy_order[_enemy_cursor])
+		var unit := get_unit(_enemy_order[_enemy_cursor])
 		_enemy_cursor = (_enemy_cursor + 1) % _enemy_order.size()
-		if candidate.hp > 0 and not _enemy_finished.has(candidate.id): unit = candidate; break
-	if unit.is_empty():
-		_finish_round()
-		return {"ok": true, "action": "round", "message": "区域已结算，新的回合开始", "visible": true}
-	var seen_before := visible_cells.has(unit.cell)
-	var targets := _visible_targets(unit)
-	var chosen := _choose_enemy_skill(unit, targets)
-	if not chosen.is_empty():
-		var result := cast_skill(unit.id, chosen.skill_id, chosen.cell)
-		return {"ok": true, "action": "skill", "skill_id": chosen.skill_id, "actor_id": unit.id, "message": "%s 释放 %s，命中 %d 个已见目标" % [unit.name, result.skill_name, result.hits.size()], "visible": true}
-	var budget := mini(int(action_points.enemy), int(unit.move))
-	var reserve := _cheapest_ready_skill(unit)
-	if not targets.is_empty() and int(action_points.enemy) > reserve: budget = mini(budget, int(action_points.enemy) - reserve)
-	var path := _advance_path(unit, _goal_for(unit, targets), budget)
-	if not path.is_empty():
-		var moved := move_unit(unit.id, path.back())
-		if moved.ok:
-			var observed := seen_before or visible_cells.has(unit.cell)
-			return {"ok": true, "action": "move", "actor_id": unit.id, "message": "敌人移动，消耗 %d 点" % moved.cost if observed else "", "visible": observed}
-	var defended := defend_unit(unit.id)
-	_enemy_finished[unit.id] = true
-	return {"ok": true, "action": "defend" if defended.ok else "wait", "actor_id": unit.id, "message": "敌人守住区域" if seen_before else "", "visible": seen_before}
+		if unit.is_empty() or unit.hp <= 0: continue
+		var seen_before := visible_cells.has(unit.cell)
+		var targets := _visible_targets(unit)
+		var chosen := _choose_enemy_skill(unit, targets)
+		if not chosen.is_empty():
+			var result := cast_skill(unit.id, chosen.skill_id, chosen.cell)
+			return {"ok": true, "action": "skill", "skill_id": chosen.skill_id, "actor_id": unit.id, "message": "%s 释放 %s，命中 %d 个已见目标" % [unit.name, result.skill_name, result.hits.size()], "visible": true}
+		var budget := mini(int(action_points.enemy), int(unit.move))
+		var reserve := _cheapest_ready_skill(unit)
+		if not targets.is_empty() and int(action_points.enemy) > reserve: budget = mini(budget, int(action_points.enemy) - reserve)
+		var path := _advance_path(unit, _goal_for(unit, targets), budget)
+		if not path.is_empty():
+			var moved := move_unit(unit.id, path.back())
+			if moved.ok:
+				var observed := seen_before or visible_cells.has(unit.cell)
+				return {"ok": true, "action": "move", "actor_id": unit.id, "message": "敌人移动，消耗 %d 点" % moved.cost if observed else "", "visible": observed}
+		var defended := defend_unit(unit.id)
+		if defended.ok:
+			return {"ok": true, "action": "defend", "actor_id": unit.id, "message": "敌人守住区域" if seen_before else "", "visible": seen_before}
+	return _end_enemy_round()
+
+func _end_enemy_round() -> Dictionary:
+	var old_round := round_number
+	round_done.enemy = true
+	_pass_initiative("enemy")
+	var advanced := round_number != old_round
+	return {"ok": true, "action": "round" if advanced else "yield", "message": "区域已结算，新的轮次开始" if advanced else "敌方已结束本轮，剩余指令由我方继续", "visible": true}
 
 func _cheapest_ready_skill(unit: Dictionary) -> int:
 	var cost := TURN_AP
@@ -563,8 +612,12 @@ func _finish_round() -> void:
 	if score_ally >= TARGET_SCORE and score_ally > score_enemy: phase = "won"
 	elif score_enemy >= TARGET_SCORE and score_enemy > score_ally: phase = "lost"
 	else:
-		phase = "player"; round_number += 1; action_points.ally = TURN_AP
+		round_number += 1; action_points = {"ally": TURN_AP, "enemy": TURN_AP}
+		round_done = {"ally": false, "enemy": false}
+		round_starter = "enemy" if round_starter == "ally" else "ally"
+		phase = "player" if round_starter == "ally" else "enemy"
+		_enemy_cursor = 0; _enemy_deployment_pending = true
 		deploy_budget.ally += 1; deploy_budget.enemy += 1
 		for unit in units:
-			if unit.side == "ally" and unit.hp > 0 and unit.get("kind", "pet") == "pet": unit.guard = false
+			if unit.hp > 0 and unit.get("kind", "pet") == "pet": unit.guard = false
 	refresh_visibility()

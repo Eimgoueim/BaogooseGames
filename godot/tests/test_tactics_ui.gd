@@ -38,8 +38,9 @@ func _click_button(button: Button) -> void:
 
 func _click_sidebar_button(screen: Control, button: Button) -> void:
 	var scroll: ScrollContainer = screen.get("_sidebar_scroll")
-	scroll.ensure_control_visible(button)
-	await _settle()
+	if scroll.is_ancestor_of(button):
+		scroll.ensure_control_visible(button)
+		await _settle()
 	await _click_button(button)
 
 func _click_cell(screen: Control, cell: Vector2i) -> void:
@@ -58,24 +59,29 @@ func _hover_cell(screen: Control, cell: Vector2i) -> void:
 		root.push_input(motion, false)
 		await _settle()
 
-func _drive_battle_process(screen: Control, battle: RefCounted, limit: int = 200) -> int:
+func _drive_reactions(screen: Control, battle: RefCounted, limit: int = 200) -> int:
 	var steps := 0
-	while (battle.phase == "enemy" or battle.has_pending_reactions()) and steps < limit:
+	while battle.has_pending_reactions() and steps < limit:
 		screen._process(1.0)
 		steps += 1
-		if DisplayServer.get_name() != "headless":
-			await process_frame
+		if DisplayServer.get_name() != "headless": await process_frame
 	return steps
 
-func _restore_battle_formation(battle: RefCounted, initial_cells: Dictionary) -> void:
-	for cell in battle.tiles:
-		battle.tiles[cell] = "ground"
-	for unit in battle.units:
-		if initial_cells.has(int(unit.id)):
-			unit.cell = initial_cells[int(unit.id)]
-		unit.hp = unit.max_hp
-		unit.guard = false
-	battle.refresh_visibility()
+func _drive_until_player(screen: Control, battle: RefCounted, limit: int = 2000) -> int:
+	var steps := 0
+	while (battle.phase != "player" or battle.has_pending_reactions()) and steps < limit:
+		screen._process(1.0)
+		steps += 1
+		if DisplayServer.get_name() != "headless": await process_frame
+	return steps
+
+func _drive_until_next_round(screen: Control, battle: RefCounted, old_round: int, limit: int = 2000) -> int:
+	var steps := 0
+	while battle.round_number == old_round and steps < limit:
+		screen._process(1.0)
+		steps += 1
+		if DisplayServer.get_name() != "headless": await process_frame
+	return steps
 
 func _living_soldiers(battle: RefCounted, side: String) -> int:
 	var count := 0
@@ -109,16 +115,23 @@ func _run() -> void:
 	var screen: Control = app.tactics
 	screen.set_process(false)
 	var battle: RefCounted = screen.battle
-	var initial_cells: Dictionary = {}
-	for initial_unit in battle.units:
-		initial_cells[int(initial_unit.id)] = initial_unit.cell
 	_check(screen.started and battle.units[0].name == original_pets[0].name, "开始后应保留宠物身份")
-	_check(screen.get("_squad_buttons").get_child_count() == 4, "侧栏只列出我方宠物")
-	_check(str(screen.get("_status").text).contains("共享行动点") and not str(screen.get("_status").text).contains("宠物行动点"), "顶部状态应显示阵营共享行动点")
-	_check(int(battle.action_points.ally) == Battle.TURN_AP, "开局应设置我方共享行动点")
+	_check(screen.get("_squad_buttons").get_child_count() == 4, "侧栏只列出我方宠物，不把自动小兵放进宠物栏")
+	_check(_living_soldiers(battle, "ally") == 6 and _living_soldiers(battle, "enemy") == 6, "开局双方应各有六名小兵在前线")
+	_check(str(screen.get("_status").text).contains("双方交替") and str(screen.get("_status").text).contains("共享行动点"), "状态栏应说明双方交替及阵营共享行动点")
+	_check(str(screen.get("_status").text).contains("我方指令"), "首轮开局应显示当前我方指令权")
+	_check(int(battle.action_points.ally) == Battle.TURN_AP and int(battle.action_points.enemy) == Battle.TURN_AP, "开局双方各有完整共享行动点")
+	_check(str(screen.get("_end_button").text).contains("结束本轮") and str(screen.get("_end_button").text).contains("空格"), "结束按钮应明确显示结束本轮与空格快捷键")
+	var setup_help_found := false
+	for child in screen.get("_roster_body").get_children():
+		if child is Label and str(child.text).contains("增援") and str(child.text).contains("小兵在前方"):
+			setup_help_found = true
+	_check(setup_help_found, "开场帮助应介绍前线兵线及前方增援")
 	var hidden_opponent: Dictionary = battle.get_unit(100)
 	screen._cell_hovered(hidden_opponent.cell)
 	_check(not screen.get("_log").text.contains(hidden_opponent.name), "鼠标悬停迷雾中的敌人不能泄露名字或属性")
+
+	# 图形环境验证窗口缩放后真实宠物选择、移动和指令交替。
 	if DisplayServer.get_name() != "headless":
 		root.size = Vector2i(1920, 1080)
 		await _settle()
@@ -126,11 +139,30 @@ func _run() -> void:
 		_click_canvas(screen.board, screen.board._cell_rect(unit_one.cell).get_center())
 		await _settle()
 		_check(screen.selected_id == 1, "窗口缩放后点击棋子应选中真实宠物")
-		var next_cell: Vector2i = unit_one.cell + Vector2i.RIGHT
-		_click_canvas(screen.board, screen.board._cell_rect(next_cell).get_center())
-		await _settle()
-		_check(unit_one.cell == next_cell and int(battle.action_points.ally) == Battle.TURN_AP - 1, "窗口像素坐标点击移动应命中格子并消耗共享一点")
-		screen.select_unit(0)
+		var options: Dictionary = battle.reachable_cells(1)
+		var destination := Vector2i(-1, -1)
+		for cell in options.keys():
+			if cell != unit_one.cell:
+				destination = cell
+				break
+		_check(destination.x >= 0, "开局宠物应有至少一个可走格")
+		if destination.x >= 0:
+			_click_canvas(screen.board, screen.board._cell_rect(destination).get_center())
+			await _settle()
+			_check(unit_one.cell == destination and battle.phase == "player" and battle.has_pending_reactions(), "真实像素点击移动应命中格子并先排入小兵响应")
+			var response_count := _living_soldiers(battle, "enemy")
+			var response_steps: int = await _drive_reactions(screen, battle)
+			_check(response_steps == response_count and battle.phase == "enemy" and not battle.has_pending_reactions(), "敌方六名小兵应各响应一次，再交出指令权")
+			var locked_pet: Dictionary = battle.get_unit(0)
+			var locked_cell: Vector2i = locked_pet.cell
+			_click_canvas(screen.board, screen.board._cell_rect(locked_cell).get_center())
+			await _settle()
+			_check(locked_pet.cell == locked_cell and screen.selected_id == 1, "敌方指令权期间应锁住我方宠物输入")
+			var enemy_ap_before: int = battle.action_points.enemy
+			var relay_steps: int = await _drive_until_player(screen, battle)
+			_check(relay_steps > 0 and relay_steps < 2000 and battle.phase == "player", "敌方宠物完成一次指令及我方小兵响应后应交回操作权")
+			_check(battle.action_points.ally == Battle.TURN_AP - int(options[destination]), "双方轮换时我方共享行动点不回满")
+			_check(battle.action_points.enemy < enemy_ap_before or battle.round_number > 1, "敌方宠物指令应消耗敌方共享行动点")
 	for dimensions in [Vector2i(1920, 1080), Vector2i(480, 720), Vector2i(1120, 960)]:
 		root.size = dimensions
 		await _settle()
@@ -143,194 +175,156 @@ func _run() -> void:
 	_check(screen.get("_sidebar").position.y >= screen.board.position.y + screen.board.size.y, "极矮窗口的棋盘与操作面板不能重叠")
 	root.size = Vector2i(1120, 960)
 	await _settle()
+	if battle.phase != "player":
+		await _drive_until_player(screen, battle)
+	_check(battle.phase == "player", "继续功能测试前应通过真实自动行动轮回到我方指令")
 
-	# 部署必须由按钮进入模式，再从绿色合法格放置；部署不消耗共享行动点。
+	# 真实按钮部署到已知、稳定且可见的控制区；免费部署不交出指令权。
 	var action_points_before_deploy: int = battle.action_points.ally
 	var deploy_budget_before: int = battle.deploy_budget.ally
 	await _click_sidebar_button(screen, screen.get("_deploy_button"))
 	_check(screen.action_mode == "deploy", "部署按钮应进入部署模式")
-	var ally_soldier_cell := Vector2i(3, 12)
-	_check(screen.board.deployment_cells.has(ally_soldier_cell), "我方已知控制区的可见空格应标为合法部署格")
-	await _click_cell(screen, ally_soldier_cell)
-	var ally_soldier: Dictionary = battle.unit_at(ally_soldier_cell)
-	_check(ally_soldier.get("kind", "") == "soldier" and ally_soldier.side == "ally", "点击合法格应新增我方小兵")
-	_check(battle.deploy_budget.ally == deploy_budget_before - 1 and battle.action_points.ally == action_points_before_deploy, "部署消耗名额但不消耗共享行动点")
-	_check(screen.get("_squad_buttons").get_child_count() == 4, "部署小兵后侧栏仍只列出宠物")
-	var selected_before_soldier_click: int = screen.selected_id
-	var ap_before_soldier_click: int = battle.action_points.ally
-	await _click_cell(screen, ally_soldier_cell)
-	_check(screen.selected_id == selected_before_soldier_click and battle.action_points.ally == ap_before_soldier_click, "点击己方小兵不能选中或直接操作它")
+	var legal_cells: Array = battle.deployment_cells("ally").keys()
+	_check(not legal_cells.is_empty(), "开局稳定控制区应提供可见合法增援格")
+	if not legal_cells.is_empty():
+		var ally_soldier_cell: Vector2i = legal_cells[0]
+		_check(screen.board.deployment_cells.has(ally_soldier_cell), "合法部署格应由棋盘显示绿色范围")
+		await _click_cell(screen, ally_soldier_cell)
+		var ally_soldier: Dictionary = battle.unit_at(ally_soldier_cell)
+		_check(ally_soldier.get("kind", "") == "soldier" and ally_soldier.side == "ally", "点击合法格应新增我方小兵")
+		_check(battle.deploy_budget.ally == deploy_budget_before - 1 and battle.action_points.ally == action_points_before_deploy and battle.phase == "player", "部署消耗名额但不消耗共享行动点或交出指令权")
+		_check(screen.get("_squad_buttons").get_child_count() == 4, "部署后宠物栏仍只列宠物")
+		var selected_before_soldier_click: int = screen.selected_id
+		await _click_cell(screen, ally_soldier_cell)
+		_check(screen.selected_id == selected_before_soldier_click and battle.action_points.ally == action_points_before_deploy, "点击己方小兵不能选中或直接操作它")
 
-	# 加入一个敌方小兵响应夹具，后续所有响应通过 screen._process 手动驱动。
-	var saved_phase: String = battle.phase
-	battle.phase = "enemy"
-	var enemy_soldier_result: Dictionary = battle.deploy_soldier("enemy", Vector2i(20, 10))
-	battle.phase = saved_phase
-	_check(enemy_soldier_result.get("ok", false), "敵方控制区应能部署响应测试小兵")
-	var enemy_soldier: Dictionary = battle.get_unit(int(enemy_soldier_result.get("id", -1)))
-	if not enemy_soldier.is_empty():
-		initial_cells[int(enemy_soldier.id)] = Vector2i(20, 10)
-		enemy_soldier.cell = Vector2i(4, 10)
-	initial_cells[int(ally_soldier.id)] = ally_soldier_cell
-	battle.refresh_visibility()
+	# 正常结束本轮交出全部剩余点数；只有敌方也结束后才重置双方AP并交换先手。
+	var round_before_end: int = battle.round_number
+	var ally_ap_before_end: int = battle.action_points.ally
+	await _click_button(screen.get("_end_button"))
+	_check(battle.round_done.ally and battle.phase == "enemy", "结束本轮应标记我方已结束并交给敌方")
+	_check(battle.action_points.ally == ally_ap_before_end and battle.round_number == round_before_end, "我方结束本轮时保留未用点数，不能提前结算或回满")
+	_check(str(screen.get("_status").text).contains("已结束"), "状态栏应标出已经结束本轮的一方")
+	var full_round_steps: int = await _drive_until_next_round(screen, battle, round_before_end, 2000)
+	await _settle()
+	_check(full_round_steps > 0 and full_round_steps < 2000 and battle.round_number == round_before_end + 1, "敌方用完/结束剩余指令后应在安全上限内结算整轮")
+	_check(battle.action_points.ally == Battle.TURN_AP and battle.action_points.enemy == Battle.TURN_AP, "双方结束后才同时重置共享行动点")
+	_check(battle.round_starter == "enemy" and battle.phase == "enemy", "下一輪应交换先手")
+	var next_enemy_steps: int = await _drive_until_player(screen, battle)
+	_check(next_enemy_steps > 0 and battle.phase == "player", "敌方先手实际下达一条指令后应交给我方")
 
+	# 技能预览与施法使用真实 UI。此隔离夹具只令敌方标记本轮已结束，
+	# 让我方合法连续演示技能，不修改移动/响应/整轮结算行为。
 	var pet_zero: Dictionary = battle.get_unit(0)
 	var pet_one: Dictionary = battle.get_unit(1)
-	var expected_ap := int(battle.action_points.ally)
-	await _click_cell(screen, Vector2i(3, 10))
-	_check(pet_zero.cell == Vector2i(3, 10) and battle.action_points.ally == expected_ap - 1, "第一只宠物移动消耗一点共享行动点；位置=%s/AP=%d/%d/phase=%s" % [str(pet_zero.cell), battle.action_points.ally, expected_ap, battle.phase])
-	_check(battle.has_pending_reactions(), "宠物成功行动后应排入敌方小兵响应")
-	var reactions_after_first: int = await _drive_battle_process(screen, battle)
-	_check(reactions_after_first > 0 and not battle.has_pending_reactions(), "小兵响应应由界面 process 队列完整处理")
-	_check(int(battle.action_points.ally) == expected_ap - 1, "敌方小兵响应不能额外扣除我方共享行动点")
-	var expected_after_first := int(battle.action_points.ally)
-	screen.select_unit(1)
-	var second_destination: Vector2i = pet_one.cell + Vector2i.RIGHT
-	var second_move_cost: int = battle.movement_cost(1, second_destination)
-	await _click_cell(screen, second_destination)
-	_check(second_move_cost > 0 and pet_one.cell == second_destination and battle.action_points.ally == expected_after_first - second_move_cost, "切换第二只宠物后仍扣同一共享行动点池；位置=%s/目标=%s/费用=%d/AP=%d/预计=%d/phase=%s/selected=%d" % [str(pet_one.cell), str(second_destination), second_move_cost, battle.action_points.ally, expected_after_first - second_move_cost, battle.phase, screen.selected_id])
-	var expected_after_second := int(battle.action_points.ally)
-	await _drive_battle_process(screen, battle)
-	_check(int(battle.action_points.ally) == expected_after_second, "第二次小兵响应不能额外消耗共享行动点")
-	var guard_button: Button = screen.get("_guard_button")
-	await _click_sidebar_button(screen, guard_button)
-	_check(pet_one.guard and battle.action_points.ally == expected_after_second - Battle.DEFEND_COST, "防御按钮扣除阵营共享点数；guard=%s/AP=%d/expected=%d" % [str(pet_one.guard), battle.action_points.ally, expected_after_second - Battle.DEFEND_COST])
-	_check(str(screen.get("_status").text).contains("共享行动点"), "行动后顶部仍显示共享点数")
-	var expected_after_guard := int(battle.action_points.ally)
-	await _drive_battle_process(screen, battle)
-	_check(int(battle.action_points.ally) == expected_after_guard, "防御引发的小兵响应不能额外扣除共享行动点")
-	await _click_button(screen.get("_end_button"))
-	_check(battle.phase == "enemy", "结束回合按钮应开始敌方阶段；phase=%s/AP=%d" % [battle.phase, battle.action_points.ally])
-	var enemy_round_steps: int = await _drive_battle_process(screen, battle, 200)
-	await _settle()
-	_check(enemy_round_steps < 200 and battle.phase == "player", "敌方宠物与小兵响应应在安全上限内完成；steps=%d/phase=%s/EnemyAP=%d" % [enemy_round_steps, battle.phase, battle.action_points.enemy])
-	_check(int(battle.action_points.ally) == Battle.TURN_AP, "新回合应恢复我方共享行动点；AP=%d/phase=%s" % [battle.action_points.ally, battle.phase])
-	_check(not pet_one.guard, "新回合应解除宠物防御；guard=%s/phase=%s" % [str(pet_one.guard), battle.phase])
-
-	# 普通技能按真实技能面板、目标预览和棋盘点击执行；充能属于单只宠物。
-	_restore_battle_formation(battle, initial_cells)
+	var skill_targets: Array[Dictionary] = [battle.get_unit(100), battle.get_unit(101), battle.get_unit(102)]
 	pet_zero.cell = Vector2i(10, 10)
 	pet_one.cell = Vector2i(10, 11)
-	var skill_targets := [battle.get_unit(100), battle.get_unit(101), battle.get_unit(102)]
+	for index in battle.units.size():
+		var unit: Dictionary = battle.units[index]
+		if unit.side == "ally" and unit.get("kind", "pet") == "pet" and unit.id not in [0, 1]: unit.cell = Vector2i(0, index)
+		if unit.side == "enemy" and unit.get("kind", "pet") == "pet" and unit.id not in [100, 101, 102]: unit.cell = Vector2i(23, index)
 	skill_targets[0].cell = Vector2i(11, 10)
 	skill_targets[1].cell = Vector2i(12, 10)
 	skill_targets[2].cell = Vector2i(11, 11)
-	for skill_target in skill_targets:
-		skill_target.max_hp = 60
-		skill_target.hp = 60
+	for target in skill_targets:
+		target.max_hp = 100
+		target.hp = 100
+	pet_zero.charge = 0
+	pet_one.charge = 0
+	battle.action_points.ally = Battle.TURN_AP
+	battle.round_done.ally = false
+	battle.round_done.enemy = true
+	battle.phase = "player"
 	battle.refresh_visibility()
 	screen.select_unit(0)
 	await _click_sidebar_button(screen, screen.get("_skills_button"))
 	_check(screen.action_mode == "skill" and screen.get("_skills_panel").visible, "释放技能按钮应打开技能面板")
 	var skill_buttons: Dictionary = screen.get("_skill_buttons")
-	_check(skill_buttons.size() == 3 and skill_buttons.has("pulse") and skill_buttons.has("shockwave") and skill_buttons.has("overload"), "技能面板应列出 pulse、shockwave 和 overload")
+	_check(skill_buttons.size() == 3 and skill_buttons.has("pulse") and skill_buttons.has("shockwave") and skill_buttons.has("overload"), "技能面板应列出三招")
 	_check(skill_buttons.get("overload").disabled and int(pet_zero.charge) == 0, "充能未满时大招按钮应禁用")
-	var charge_test_ap := int(battle.action_points.ally)
+	var ap_before_wave: int = battle.action_points.ally
 	var hp_before_wave: Array[int] = [skill_targets[0].hp, skill_targets[1].hp, skill_targets[2].hp]
 	await _click_sidebar_button(screen, skill_buttons["shockwave"])
-	_check(screen.selected_skill_id == "shockwave" and str(screen.get("_skill_info").text).contains("震荡波"), "点击技能按钮应切换到震荡波并更新技能信息")
-	_check(screen.board.skill_targets.has(skill_targets[0].cell), "可见且合法的敌人应显示橙色技能目标框")
+	_check(screen.selected_skill_id == "shockwave", "点击技能按钮应选择震荡波")
+	_check(screen.board.skill_targets.has(skill_targets[0].cell), "可见且合法的敌人应显示技能目标框")
 	await _hover_cell(screen, skill_targets[0].cell)
-	_check(screen.board.skill_area.size() == 5 and screen.board.skill_hit_cells.size() == 3, "震荡波悬停应显示菱形范围及三个已知命中格")
+	_check(screen.board.skill_area.size() == 5 and screen.board.skill_hit_cells.size() == 3, "震荡波悬停显示范围及多个已知命中格")
 	_check(screen.get("_log").text.contains("对手1") and screen.get("_log").text.contains("对手2") and screen.get("_log").text.contains("对手3"), "技能预览应展示多个可见目标的伤害")
 	await _click_cell(screen, skill_targets[0].cell)
-	_check(skill_targets[0].hp < hp_before_wave[0] and skill_targets[1].hp < hp_before_wave[1] and skill_targets[2].hp < hp_before_wave[2], "施放震荡波应命中范围内的多个敌人")
-	_check(battle.action_points.ally == charge_test_ap - 6 and pet_zero.charge == 1 and pet_one.charge == 0, "普通技能扣共享6点并只增加施法宠物的充能")
-	var shockwave_reactions: int = await _drive_battle_process(screen, battle)
-	_check(shockwave_reactions == 1 and not battle.has_pending_reactions(), "一次技能施放应让敌方小兵只响应一次")
-
-	# 第二只宠物使用不同普通技能；其充能独立于第一只宠物。
+	_check(skill_targets[0].hp < hp_before_wave[0] and skill_targets[1].hp < hp_before_wave[1] and skill_targets[2].hp < hp_before_wave[2], "震荡波应命中范围内多个敌人")
+	_check(battle.action_points.ally == ap_before_wave - 6 and pet_zero.charge == 1, "施法扣共享行动点并只增加施法宠物充能")
+	var skill_reaction_count: int = _living_soldiers(battle, "enemy")
+	var shockwave_reactions: int = await _drive_reactions(screen, battle)
+	_check(shockwave_reactions == skill_reaction_count, "技能行动后对方所有存活小兵各响应一次")
+	_check(battle.phase == "player", "夹具中对方已结束后，小兵响应完成应继续我方指令")
 	screen.select_unit(1)
-	skill_buttons = screen.get("_skill_buttons")
 	await _click_sidebar_button(screen, skill_buttons["pulse"])
-	_check(screen.selected_skill_id == "pulse", "第二只宠物应能选择 pulse")
-	var pulse_cost_before := int(battle.action_points.ally)
-	var second_target_hp := int(skill_targets[2].hp)
-	await _hover_cell(screen, skill_targets[2].cell)
-	_check(screen.board.skill_area.size() == 1 and screen.board.skill_hit_cells.size() == 1, "pulse 悬停应只预览单体目标")
+	var pet_one_target_hp: int = skill_targets[2].hp
 	await _click_cell(screen, skill_targets[2].cell)
-	_check(skill_targets[2].hp < second_target_hp and battle.action_points.ally == pulse_cost_before - 4, "pulse 应命中单体并扣共享4点")
-	_check(pet_one.charge == 1 and pet_zero.charge == 1, "第二只宠物施法只增加自己的充能")
-	await _drive_battle_process(screen, battle)
-	_restore_battle_formation(battle, initial_cells)
-	_check(pet_zero.charge == 1 and pet_one.charge == 1, "普通技能充能应在敌方回合前保留")
-	await _click_button(screen.get("_end_button"))
-	_check(battle.phase == "enemy", "技能测试后结束回合应开始敌方阶段")
-	var skill_enemy_steps: int = await _drive_battle_process(screen, battle, 200)
-	await _settle()
-	_check(skill_enemy_steps < 200 and battle.phase == "player", "技能测试后的敌方回合及小兵响应应完整结束")
-	_check(battle.action_points.ally == Battle.TURN_AP and pet_zero.charge == 1 and pet_one.charge == 1, "跨回合共享点重置且两只宠物各自保留充能")
+	_check(skill_targets[2].hp < pet_one_target_hp and pet_one.charge == 1 and pet_zero.charge == 1, "第二只宠物的普通技能应命中且充能独立")
+	await _drive_reactions(screen, battle)
 
-	# 思考期间不推进养成，也不在返回时补算这段时间。
-	var age_before: int = app.state.pets[0].ageTicks
-	app.game.now_ms -= 20000
-	app._process(0.1)
-	_check(app.state.pets[0].ageTicks == age_before, "战棋期间应暂停养成衰减")
-
-	# 下一轮使用独立宠物充能三格，实际施放大招并确认共享花费和一次小兵响应。
-	_restore_battle_formation(battle, initial_cells)
-	pet_zero.cell = Vector2i(10, 10)
-	pet_one.cell = Vector2i(10, 11)
-	var target: Dictionary = battle.get_unit(100)
-	var area_targets: Array[Dictionary] = [target, battle.get_unit(101), battle.get_unit(102)]
-	area_targets[0].cell = Vector2i(11, 10)
-	area_targets[1].cell = Vector2i(12, 10)
-	area_targets[2].cell = Vector2i(11, 11)
-	for area_target in area_targets:
-		area_target.max_hp = 60
-		area_target.hp = 60
+	# 独立充能夹具用三次 pulse（12点）和 ultimate（8点），不跨回合伪造指令权。
+	pet_zero.charge = 0
+	pet_one.charge = 0
+	battle.action_points.ally = Battle.TURN_AP
+	battle.round_done.ally = false
+	battle.round_done.enemy = true
+	battle.phase = "player"
 	battle.refresh_visibility()
 	screen.select_unit(0)
 	await _click_sidebar_button(screen, screen.get("_skills_button"))
 	skill_buttons = screen.get("_skill_buttons")
 	await _click_sidebar_button(screen, skill_buttons["pulse"])
-	await _hover_cell(screen, target.cell)
-	var charge_before_pulse := int(pet_zero.charge)
-	var ap_before_pulse := int(battle.action_points.ally)
-	var pulse_reaction_count := _living_soldiers(battle, "enemy")
-	await _click_cell(screen, target.cell)
-	_check(pet_zero.charge == charge_before_pulse + 1 and battle.action_points.ally == ap_before_pulse - 4, "pulse命中后充能+1且消耗共享4点")
-	var pulse_reactions: int = await _drive_battle_process(screen, battle)
-	_check(pulse_reactions == pulse_reaction_count and not battle.has_pending_reactions(), "普通技能命中后每个敌小兵应恰好响应一次；响应步数=%d/施法前敌兵数=%d" % [pulse_reactions, pulse_reaction_count])
-	await _click_sidebar_button(screen, skill_buttons["shockwave"])
-	await _hover_cell(screen, target.cell)
-	_check(screen.board.skill_hit_cells.size() == 3, "pet充到大招前shockwave仍能预览多目标")
-	var ap_before_shockwave := int(battle.action_points.ally)
-	await _click_cell(screen, target.cell)
-	_check(pet_zero.charge == charge_before_pulse + 2 and battle.action_points.ally == ap_before_shockwave - 6, "第二次普通技能继续独立累加充能并扣6点")
-	await _drive_battle_process(screen, battle)
-	_check(pet_zero.charge == Skills.CHARGE_MAX, "同一宠物成功命中三次普通技能后充能满格")
-	_check(not screen.get("_skill_buttons")["overload"].disabled, "充满三格后大招按钮应启用")
-	await _click_sidebar_button(screen, screen.get("_skill_buttons")["overload"])
+	var pulse_target: Dictionary = skill_targets[0]
+	for charge_index in 3:
+		var target_hp_before: int = pulse_target.hp
+		await _hover_cell(screen, pulse_target.cell)
+		_check(screen.board.skill_area.size() == 1 and screen.board.skill_hit_cells.size() == 1, "pulse预览应标记单体可见敌人")
+		await _click_cell(screen, pulse_target.cell)
+		_check(pulse_target.hp < target_hp_before and pet_zero.charge == charge_index + 1, "每次成功命中普通技能后充能加一")
+		await _drive_reactions(screen, battle)
+	_check(not skill_buttons["overload"].disabled and pet_zero.charge == Skills.CHARGE_MAX, "充满三格后大招按钮启用")
+	await _click_sidebar_button(screen, skill_buttons["overload"])
 	_check(screen.selected_skill_id == "overload" and str(screen.get("_skill_info").text).contains("消耗 3 格充能"), "大招按钮应显示消耗三格充能")
-	await _hover_cell(screen, target.cell)
-	_check(screen.board.skill_area.size() == 13 and screen.board.skill_hit_cells.has(area_targets[0].cell) and screen.board.skill_hit_cells.has(area_targets[1].cell) and screen.board.skill_hit_cells.has(area_targets[2].cell), "overload悬停应显示13格几何范围并标记三名已知宠物命中格；area=%d/hits=%d/cell=%s/targets=%s" % [screen.board.skill_area.size(), screen.board.skill_hit_cells.size(), str(target.cell), str(screen.board.skill_targets)])
-	var ap_before_ultimate := int(battle.action_points.ally)
-	await _click_cell(screen, target.cell)
-	var ultimate_reaction_count := _living_soldiers(battle, "enemy")
-	_check(pet_zero.charge == 0 and battle.action_points.ally == ap_before_ultimate - 8, "大招应消耗共享8点并清空施法宠物的充能")
-	var ultimate_reactions: int = await _drive_battle_process(screen, battle)
-	_check(ultimate_reactions == ultimate_reaction_count and not battle.has_pending_reactions(), "大招结算后每个敌方小兵应恰好响应一次且不递归；响应=%d/施法后存活=%d" % [ultimate_reactions, ultimate_reaction_count])
-	_check(pet_one.charge == 1, "施放大招不能消耗第二只宠物的独立充能")
+	await _hover_cell(screen, pulse_target.cell)
+	_check(screen.board.skill_area.size() == 13 and screen.board.skill_hit_cells.size() >= 1, "大招悬停应显示13格几何范围与可见命中")
+	var ultimate_ap_before: int = battle.action_points.ally
+	await _click_cell(screen, pulse_target.cell)
+	_check(pet_zero.charge == 0 and battle.action_points.ally == ultimate_ap_before - 8, "大招消耗8共享行动点并清空施法者充能")
+	await _drive_reactions(screen, battle)
+	_check(pet_one.charge == 0, "大招不能消耗另一只宠物的充能")
 
-	# 用普通技能结束残局，检查主场景奖励只入账一次。
+	# 战棋期间暂停养成，不在返回时补算这段时间。
+	var age_before: int = app.state.pets[0].ageTicks
+	app.game.now_ms -= 20000
+	app._process(0.1)
+	_check(app.state.pets[0].ageTicks == age_before, "战棋期间应暂停养成衰减")
+
+	# 终局奖励使用独立残局 fixture，通过真实 pulse 点击结束；结算只入账一次。
 	for enemy in battle.units:
-		if enemy.side == "enemy" and enemy.get("kind", "pet") == "pet":
-			enemy.hp = 0
-	target.cell = Vector2i(11, 10)
-	target.hp = 1
-	for enemy in battle.units:
-		if enemy.side == "enemy" and enemy.get("kind", "pet") == "soldier":
-			enemy.hp = 0
+		if enemy.side == "enemy" and enemy.get("kind", "pet") == "pet": enemy.hp = 0
+	var last_enemy: Dictionary = skill_targets[0]
+	last_enemy.hp = 1
+	last_enemy.cell = Vector2i(11, 10)
+	pet_zero.cell = Vector2i(10, 10)
+	battle.action_points.ally = Battle.TURN_AP
+	battle.round_done.ally = false
+	battle.round_done.enemy = true
+	battle.phase = "player"
 	battle.refresh_visibility()
-	await _click_sidebar_button(screen, screen.get("_skill_buttons")["pulse"])
-	await _hover_cell(screen, target.cell)
-	_check(screen.get("_log").text.contains("预计伤害") and screen.board.skill_targets.has(target.cell), "最终pulse目标应显示已知伤害预览")
+	screen.select_unit(0)
+	await _click_sidebar_button(screen, screen.get("_skills_button"))
+	skill_buttons = screen.get("_skill_buttons")
+	await _click_sidebar_button(screen, skill_buttons["pulse"])
+	await _hover_cell(screen, last_enemy.cell)
+	_check(screen.get("_log").text.contains("预计伤害") and screen.board.skill_targets.has(last_enemy.cell), "残局目标应显示可见伤害预览")
 	var coins_before := int(app.state.coins)
 	var points_before := int(app.state.points)
 	var exp_before := float(app.state.exp)
-	await _click_cell(screen, target.cell)
-	_check(battle.phase == "won" and screen.settled, "pulse消灭最后一只敌方宠物应显示胜利并结算")
+	await _click_cell(screen, last_enemy.cell)
+	_check(battle.phase == "won" and screen.settled, "消灭最后一只敌方宠物应胜利并结算")
 	_check(app.state.coins == coins_before + 60 and app.state.points == points_before + 10 and app.state.exp == exp_before + 20, "奖励应统一通过主场景入账")
 	screen._refresh_battle()
 	screen._refresh_battle()
@@ -341,13 +335,13 @@ func _run() -> void:
 	app._process(0.001)
 	_check(app.state.pets[0].ageTicks == age_before, "退出战棋后不能补算暂停时间")
 
-	# 结束按钮必须真实返回编队，且不能重复领取奖励。
+	# 结束按钮实际返回编队，且不重复领奖；进行中的战斗返回仍需双确认。
 	app.handle("tactics")
 	app.handle("tacticsstart")
 	await _settle()
 	screen = app.tactics
 	screen.set_process(false)
-	screen.battle.phase = "lost"
+	screen.battle.phase = "lost" # 仅模拟终局界面的返回入口。
 	screen._refresh_battle()
 	await _click_button(screen.get("_end_button"))
 	_check(not screen.started and screen.get("_roster_panel").visible, "战斗结束后的按钮应真正返回编队")
@@ -364,5 +358,5 @@ func _run() -> void:
 	_check(not screen.visible and app.modal_key == "", "确认退出后应回到房间")
 	app.queue_free()
 	await process_frame
-	print("宠物战棋入口、共享行动点、部署、窗口、暂停养成与奖励集成验证通过" if failures == 0 else "战棋集成验证失败：%d" % failures)
+	print("宠物战棋交替指令、前线部署、技能充能、窗口、暂停养成与奖励集成验证通过" if failures == 0 else "战棋集成验证失败：%d" % failures)
 	quit(0 if failures == 0 else 1)

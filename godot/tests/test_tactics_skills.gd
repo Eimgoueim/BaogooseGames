@@ -20,7 +20,27 @@ func _new_battle(pet_count: int = 2) -> RefCounted:
 		pets.append({"species":"goose", "name":"技能测试鹅%d" % index, "health":100, "energy":75, "level":1})
 	var battle = BattleState.new()
 	battle.setup(pets, catalog)
+	var keep: Array[Dictionary] = []
+	for unit: Dictionary in battle.units:
+		if unit.get("kind", "pet") != "soldier": keep.append(unit)
+	battle.units = keep
 	return battle
+
+func _enemy_until_player(battle: Variant) -> void:
+	var guard := 0
+	while battle.phase == "enemy" and not battle.round_done.enemy and guard < 100:
+		battle.step_enemy()
+		guard += 1
+	for foe: Dictionary in _units(battle, "enemy"):
+		foe.guard = false
+
+func _full_round(battle: Variant) -> void:
+	var start: int = battle.round_number
+	var guard := 0
+	while battle.phase not in ["won", "lost"] and battle.round_number == start and guard < 200:
+		if battle.phase == "player" and not battle.round_done.ally: battle.end_player_turn()
+		elif battle.phase == "enemy": battle.step_enemy()
+		guard += 1
 
 func _units(battle: Variant, side: String, kind: String = "pet") -> Array[Dictionary]:
 	var found: Array[Dictionary] = []
@@ -50,6 +70,7 @@ func _arrange_cluster(battle: Variant, caster_cell := Vector2i(5, 5), center_cel
 	var foes := _units(battle, "enemy")
 	for index in foes.size():
 		foes[index].hp = 100; foes[index].max_hp = 100
+		foes[index].sight = 0; foes[index].move = 0
 	foes[0].cell = center_cell
 	if foes.size() > 1: foes[1].cell = center_cell + Vector2i.RIGHT
 	if foes.size() > 2: foes[2].cell = center_cell + Vector2i.DOWN
@@ -112,6 +133,7 @@ func _test_catalog_and_normal_skills() -> void:
 	_check(caster.charge == 1 and pulse.charge_gain == 1, "成功普通技能施放应增加一格充能")
 	_check(battle.action_points.ally == BattleState.TURN_AP - 4, "pulse实际施放应消耗4点共享AP")
 	_check(friend.hp == friend.max_hp, "技能不得对己方造成伤害")
+	_enemy_until_player(battle)
 
 	var wave_preview: Dictionary = battle.skill_preview(int(caster.id), "shockwave", center)
 	_check(wave_preview.get("ok", false) and wave_preview.hits.size() == 3 and wave_preview.cost == 6, "shockwave应以半径1命中三个相邻敌人并花费6AP")
@@ -125,6 +147,7 @@ func _test_catalog_and_normal_skills() -> void:
 		_check(foes[index].hp == foe_hps[index] - expected_wave_damage, "shockwave应对每个命中敌人应用0.75倍伤害")
 	_check(caster.charge == 2, "命中多个敌人的一次范围技能只增加一格充能")
 	_check(friend.hp == friend.max_hp and not wave.hits.any(func(hit: Dictionary): return hit.id == friend.id), "shockwave必须排除范围内友军")
+	_enemy_until_player(battle)
 	_check(_unit(battle, "ally", 1).charge == 0, "另一只宠物不得共享或继承施法者充能")
 
 func _test_species_loadouts_and_copy_isolation() -> void:
@@ -147,18 +170,21 @@ func _test_charge_and_ultimate() -> void:
 	_assert_failed_cast(battle, caster, "overload", center, "未满充能时大招必须失败")
 	var pulse: Dictionary = battle.cast_skill(int(caster.id), "pulse", center)
 	_check(pulse.get("ok", false) and caster.charge == 1, "第一次pulse应充能至1")
+	_enemy_until_player(battle)
 	var wave: Dictionary = battle.cast_skill(int(caster.id), "shockwave", center)
 	_check(wave.get("ok", false) and wave.hits.size() == 3 and caster.charge == 2, "多目标shockwave一次施放仍只充能1格")
+	_enemy_until_player(battle)
 	pulse = battle.cast_skill(int(caster.id), "pulse", center)
 	_check(pulse.get("ok", false) and caster.charge == SkillCatalog.CHARGE_MAX, "第三次普通技能应充满3格")
+	_enemy_until_player(battle)
 	var capped: Dictionary = battle.cast_skill(int(caster.id), "pulse", center)
 	_check(capped.get("ok", false) and caster.charge == SkillCatalog.CHARGE_MAX, "普通技能充能不得超过上限3")
 
-	battle.deploy_budget.enemy = 0
+	_enemy_until_player(battle)
 	_check(battle.end_player_turn(), "满充能宠物应可结束己方回合")
-	battle.action_points.enemy = 0
-	while battle.phase == "enemy": battle.step_enemy()
-	_check(battle.phase == "player" and caster.charge == SkillCatalog.CHARGE_MAX, "充能应跨完整回合保留")
+	_full_round(battle)
+	_check(caster.charge == SkillCatalog.CHARGE_MAX, "充能应跨完整回合保留")
+	_enemy_until_player(battle)
 	var before_hp: int = foes[0].hp
 	var outer_hp: int = foes[3].hp
 	var ultimate_preview: Dictionary = battle.skill_preview(int(caster.id), "overload", center)
@@ -168,9 +194,11 @@ func _test_charge_and_ultimate() -> void:
 	_check(ultimate.get("ok", false) and foes[0].hp == before_hp - int(ultimate_preview.damage) and foes[3].hp == outer_hp - int(ultimate_preview.damage), "overload施放应应用伤害至半径2的外缘敌人")
 	_check(caster.charge == 0 and ultimate.charge_spent == SkillCatalog.CHARGE_MAX, "大招成功施放后应扣除3格并清空充能")
 	_check(battle.action_points.ally == BattleState.TURN_AP - 8, "overload应从共享池扣除8AP")
+	_enemy_until_player(battle)
 	for index in 4:
 		var next: Dictionary = battle.cast_skill(int(caster.id), "pulse", center)
 		_check(next.get("ok", false), "充能归零后普通技能仍应可用")
+		if index < 3: _enemy_until_player(battle)
 	_check(caster.charge == SkillCatalog.CHARGE_MAX, "充能达到3格后更多普通施法仍应封顶")
 
 	var passive := _new_battle()
@@ -178,6 +206,7 @@ func _test_charge_and_ultimate() -> void:
 	passive_pet.cell = Vector2i(1, 1)
 	passive.refresh_visibility()
 	var moving: Dictionary = passive.move_unit(int(passive_pet.id), Vector2i(2, 1))
+	_enemy_until_player(passive)
 	var defending: Dictionary = passive.defend_unit(int(_unit(passive, "ally", 1).id))
 	_check(moving.get("ok", false) and defending.get("ok", false) and passive_pet.charge == 0, "移动和防御不得积累技能充能")
 

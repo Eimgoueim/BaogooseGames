@@ -11,6 +11,14 @@ const ENEMY_SPAWNS: Array[Vector2i] = [
 	Vector2i(21, 10), Vector2i(21, 11), Vector2i(21, 12), Vector2i(21, 13),
 	Vector2i(22, 10), Vector2i(22, 13),
 ]
+const ALLY_FRONTLINE_SPAWNS: Array[Vector2i] = [
+	Vector2i(6, 10), Vector2i(6, 11), Vector2i(6, 12), Vector2i(6, 13),
+	Vector2i(5, 10), Vector2i(5, 13),
+]
+const ENEMY_FRONTLINE_SPAWNS: Array[Vector2i] = [
+	Vector2i(17, 10), Vector2i(17, 11), Vector2i(17, 12), Vector2i(17, 13),
+	Vector2i(18, 10), Vector2i(18, 13),
+]
 
 
 static func create_regions() -> Array[Dictionary]:
