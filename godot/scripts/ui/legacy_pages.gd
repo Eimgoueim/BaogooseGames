@@ -28,6 +28,7 @@ var _top_ui := 96.0
 var _usebar: PanelContainer
 var _use_track: HBoxContainer
 var _use_middle: HBoxContainer    # 中间内容层：可伸缩 + 裁切，保证两端箭头永远可见
+var _bar_signature := ""           # 道具栏内容指纹：没变就不重建按钮
 var _use_page := 0
 var _use_kind := ""
 var _signature := ""            # 页面内容指纹：没变就不重建（否则每帧重建会让滚动条跳回顶部）
@@ -102,6 +103,7 @@ func refresh_usebar(page: String, any_open: bool, state: Dictionary, catalog: Di
 		_usebar = null
 		_use_track = null
 		_use_middle = null
+		_bar_signature = ""
 		return
 	if not is_instance_valid(_usebar):
 		_usebar = PanelContainer.new()
@@ -122,9 +124,6 @@ func refresh_usebar(page: String, any_open: bool, state: Dictionary, catalog: Di
 		_use_track.add_theme_constant_override("separation", 5)
 		_use_track.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 		_usebar.add_child(_use_track)
-	for child in _use_track.get_children():
-		_use_track.remove_child(child)
-		child.queue_free()
 	var bar_data := _bar_set()
 	if bar_data.kind != _use_kind:
 		_use_kind = bar_data.kind
@@ -132,6 +131,20 @@ func refresh_usebar(page: String, any_open: bool, state: Dictionary, catalog: Di
 	var size := maxi(3, int(floor((maxf(320.0, vp.x) - 112.0) / 92.0)))
 	var pages := maxi(1, int(ceil(float(bar_data.keys.size()) / size)))
 	_use_page = clampi(_use_page, 0, pages - 1)
+	# 内容没变就别重建：真人点击是"按下 → 抬起"跨帧完成的，每帧重建会让抬起落在
+	# 已经被 queue_free 的按钮上，pressed 永远不触发（表现为"点道具没反应"）
+	var sig := str(_page, "|", bar_data.kind, "|", _use_page, "|", bar_data.keys, "|", int(vp.x),
+		"|", str(_state.get("inv")), "|", str(_state.get("wear")), "|", str(_state.get("furnOwn")),
+		"|", str(_state.get("decos")), "|", str(_state.get("placed")), "|", str(_state.get("sel")),
+		"|", str(_state.get("edit")), "|", str(_state.get("coins")), "|", str(_state.get("points")),
+		"|", str(_active_pet(_state.get("pets", [])).get("asleep", false)))
+	if sig == _bar_signature and is_instance_valid(_use_track) and is_instance_valid(_use_middle) \
+		and _use_track.get_child_count() >= 3 and _use_middle.get_child_count() > 0:
+		return
+	_bar_signature = sig
+	for child in _use_track.get_children():
+		_use_track.remove_child(child)
+		child.queue_free()
 	# 左箭头固定在栏的最左端
 	var previous := _bar_button("‹", "useleft")
 	previous.custom_minimum_size = Vector2(30, 30)
@@ -197,11 +210,14 @@ func _rebuild() -> void:
 	var keep_scroll := 0
 	if is_instance_valid(_scroll):
 		keep_scroll = _scroll.scroll_vertical
+	# 只重建页面本身，底部道具栏原样保留：
+	# 真人点击是"按下 → 抬起"跨帧完成的，若每次刷新都把道具栏按钮释放掉，
+	# 抬起就落在已 queue_free 的按钮上，pressed 不触发（表现为"道具点了没反应"）
 	for child in get_children():
+		if child == _usebar:
+			continue
 		remove_child(child)
 		child.queue_free()
-	_usebar = null
-	_use_track = null
 	_panel = PanelContainer.new()
 	_panel.mouse_filter = Control.MOUSE_FILTER_STOP
 	UIStyle.apply(self, _vars)
