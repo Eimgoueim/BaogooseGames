@@ -146,9 +146,12 @@ func refresh_usebar(page: String, any_open: bool, state: Dictionary, catalog: Di
 		_use_track.remove_child(child)
 		child.queue_free()
 	# 左箭头固定在栏的最左端
+	var paging := pages > 1
 	var previous := _bar_button("‹", "useleft")
 	previous.custom_minimum_size = Vector2(30, 30)
 	previous.disabled = _use_page <= 0
+	previous.visible = paging          # 只有一页时不显示死箭头（按了没反应会让玩家困惑）
+	previous.tooltip_text = "上一页" if paging else ""
 	_use_track.add_child(previous)
 	# 中间层：吃掉剩余宽度并裁切，道具名再长也只会裁中间，不会把两侧箭头挤出屏幕
 	_use_middle = HBoxContainer.new()
@@ -175,6 +178,8 @@ func refresh_usebar(page: String, any_open: bool, state: Dictionary, catalog: Di
 	var next := _bar_button("›", "useright")
 	next.custom_minimum_size = Vector2(30, 30)
 	next.disabled = _use_page >= pages - 1
+	next.visible = paging
+	next.tooltip_text = "下一页" if paging else ""
 	_use_track.add_child(next)
 
 func _notification(what: int) -> void:
