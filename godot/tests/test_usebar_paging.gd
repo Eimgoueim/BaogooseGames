@@ -21,7 +21,7 @@ func _arrows() -> Array:
 	var track = app.pages.get("_use_track")
 	if track == null:
 		return out
-	var count := track.get_child_count()
+	var count: int = track.get_child_count()
 	if count < 2:
 		return out
 	out.append(track.get_child(0))
