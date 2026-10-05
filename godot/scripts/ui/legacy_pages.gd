@@ -27,13 +27,38 @@ var _viewport_size := Vector2(1120, 960)
 var _top_ui := 96.0
 var _usebar: PanelContainer
 var _use_track: HBoxContainer
+var _use_middle: HBoxContainer    # 中间内容层：可伸缩 + 裁切，保证两端箭头永远可见
+var _bar_signature := ""           # 道具栏内容指纹：没变就不重建按钮
 var _use_page := 0
 var _use_kind := ""
+var _signature := ""            # 页面内容指纹：没变就不重建（否则每帧重建会让滚动条跳回顶部）
+var _pending_scroll := -1       # 重建后待恢复的滚动位置
+var _pending_left := 0
 
 func _ready() -> void:
 	mouse_filter = Control.MOUSE_FILTER_IGNORE
 	set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	_update_layout()
+
+func _page_signature() -> String:
+	var st := _state
+	var species := ""
+	var levels := 0
+	for p in st.get("pets", []):
+		species += str(p.get("species", "")) + ","
+		levels += int(p.get("level", 1))
+	match _page:
+		"shop":
+			return str(st.get("coins"), st.get("inv"), st.get("furnOwn"), st.get("decos"), st.get("wear"),
+				st.get("collection"), st.get("seenItems"), st.get("hasToy"), species, levels)
+		"gacha":
+			return str(st.get("coins"), st.get("points"), st.get("pity"), st.get("pulls"),
+				st.get("collection"), st.get("decos"), st.get("wear"), st.get("furnOwn"), st.get("hasToy"))
+		"points":
+			return str(st.get("points"), st.get("coins"), st.get("title"), st.get("decor"),
+				st.get("memoUnlocked"), st.get("shards"), st.get("grave"))
+		_:
+			return str(st)
 
 func show_page(page: String, state: Dictionary, catalog: Dictionary, art: Dictionary, top_ui: float) -> void:
 	_page = page
@@ -43,10 +68,17 @@ func show_page(page: String, state: Dictionary, catalog: Dictionary, art: Dictio
 	_top_ui = top_ui
 	_vars = _theme_vars()
 	visible = true
+	var sig := str(page, "|", top_ui, "|", _page_signature(), "|", str(_vars).hash())
+	if sig == _signature and is_instance_valid(_scroll):
+		_update_layout()      # 内容没变：只更新布局，保住滚动位置
+		return
+	_signature = sig
 	_rebuild()
 	_update_layout()
 
 func close_page() -> void:
+	_signature = ""
+	_pending_scroll = -1
 	_page = ""
 	refresh_usebar("", false, {}, _catalog, _vars)
 	visible = false
@@ -58,6 +90,7 @@ func close_page() -> void:
 	_scroll = null
 	_usebar = null
 	_use_track = null
+	_use_middle = null
 
 func refresh_usebar(page: String, any_open: bool, state: Dictionary, catalog: Dictionary, vars: Dictionary) -> void:
 	_page = page
@@ -69,6 +102,8 @@ func refresh_usebar(page: String, any_open: bool, state: Dictionary, catalog: Di
 		if is_instance_valid(_usebar): _usebar.queue_free()
 		_usebar = null
 		_use_track = null
+		_use_middle = null
+		_bar_signature = ""
 		return
 	if not is_instance_valid(_usebar):
 		_usebar = PanelContainer.new()
@@ -89,9 +124,6 @@ func refresh_usebar(page: String, any_open: bool, state: Dictionary, catalog: Di
 		_use_track.add_theme_constant_override("separation", 5)
 		_use_track.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 		_usebar.add_child(_use_track)
-	for child in _use_track.get_children():
-		_use_track.remove_child(child)
-		child.queue_free()
 	var bar_data := _bar_set()
 	if bar_data.kind != _use_kind:
 		_use_kind = bar_data.kind
@@ -99,32 +131,55 @@ func refresh_usebar(page: String, any_open: bool, state: Dictionary, catalog: Di
 	var size := maxi(3, int(floor((maxf(320.0, vp.x) - 112.0) / 92.0)))
 	var pages := maxi(1, int(ceil(float(bar_data.keys.size()) / size)))
 	_use_page = clampi(_use_page, 0, pages - 1)
-	if pages > 1:
-		_add_text_to(_use_track, str(bar_data.label) + " " + str(_use_page + 1) + "/" + str(pages), 10, Color(1, 1, 1, 0.82))
+	# 内容没变就别重建：真人点击是"按下 → 抬起"跨帧完成的，每帧重建会让抬起落在
+	# 已经被 queue_free 的按钮上，pressed 永远不触发（表现为"点道具没反应"）
+	var sig := str(_page, "|", bar_data.kind, "|", _use_page, "|", bar_data.keys, "|", int(vp.x),
+		"|", str(_state.get("inv")), "|", str(_state.get("wear")), "|", str(_state.get("furnOwn")),
+		"|", str(_state.get("decos")), "|", str(_state.get("placed")), "|", str(_state.get("sel")),
+		"|", str(_state.get("edit")), "|", str(_state.get("coins")), "|", str(_state.get("points")),
+		"|", str(_active_pet(_state.get("pets", [])).get("asleep", false)))
+	if sig == _bar_signature and is_instance_valid(_use_track) and is_instance_valid(_use_middle) \
+		and _use_track.get_child_count() >= 3 and _use_middle.get_child_count() > 0:
+		return
+	_bar_signature = sig
+	for child in _use_track.get_children():
+		_use_track.remove_child(child)
+		child.queue_free()
+	# 左箭头固定在栏的最左端
+	var paging := pages > 1
 	var previous := _bar_button("‹", "useleft")
 	previous.custom_minimum_size = Vector2(30, 30)
 	previous.disabled = _use_page <= 0
+	previous.visible = paging          # 只有一页时不显示死箭头（按了没反应会让玩家困惑）
+	previous.tooltip_text = "上一页" if paging else ""
 	_use_track.add_child(previous)
-	var left_space := Control.new()
-	left_space.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	_use_track.add_child(left_space)
+	# 中间层：吃掉剩余宽度并裁切，道具名再长也只会裁中间，不会把两侧箭头挤出屏幕
+	_use_middle = HBoxContainer.new()
+	_use_middle.add_theme_constant_override("separation", 5)
+	_use_middle.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_use_middle.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	_use_middle.alignment = BoxContainer.ALIGNMENT_CENTER
+	_use_middle.clip_contents = true
+	_use_track.add_child(_use_middle)
+	if pages > 1:
+		_add_text_to(_use_middle, str(bar_data.label) + " " + str(_use_page + 1) + "/" + str(pages), 10, Color(1, 1, 1, 0.82))
 	for extra in _bar_extras(str(bar_data.kind)):
 		var b := _bar_button(str(extra.text), str(extra.action))
 		b.custom_minimum_size = Vector2(0, 30)
 		b.disabled = _as_bool(extra.get("disabled", false))
-		_use_track.add_child(b)
+		_use_middle.add_child(b)
 	if bar_data.keys.is_empty():
-		_add_text_to(_use_track, str(bar_data.empty), 10, Color(1, 1, 1, 0.82))
+		_add_text_to(_use_middle, str(bar_data.empty), 10, Color(1, 1, 1, 0.82))
 	else:
 		for key in bar_data.keys.slice(_use_page * size, mini(bar_data.keys.size(), (_use_page + 1) * size)):
 			var chip := _bar_chip(str(bar_data.kind), str(key))
-			_use_track.add_child(chip)
-	var right_space := Control.new()
-	right_space.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	_use_track.add_child(right_space)
+			_use_middle.add_child(chip)
+	# 右箭头固定在栏的最右端
 	var next := _bar_button("›", "useright")
 	next.custom_minimum_size = Vector2(30, 30)
 	next.disabled = _use_page >= pages - 1
+	next.visible = paging
+	next.tooltip_text = "下一页" if paging else ""
 	_use_track.add_child(next)
 
 func _notification(what: int) -> void:
@@ -157,11 +212,17 @@ func _theme_vars() -> Dictionary:
 	return theme.get("vars", {})
 
 func _rebuild() -> void:
+	var keep_scroll := 0
+	if is_instance_valid(_scroll):
+		keep_scroll = _scroll.scroll_vertical
+	# 只重建页面本身，底部道具栏原样保留：
+	# 真人点击是"按下 → 抬起"跨帧完成的，若每次刷新都把道具栏按钮释放掉，
+	# 抬起就落在已 queue_free 的按钮上，pressed 不触发（表现为"道具点了没反应"）
 	for child in get_children():
+		if child == _usebar:
+			continue
 		remove_child(child)
 		child.queue_free()
-	_usebar = null
-	_use_track = null
 	_panel = PanelContainer.new()
 	_panel.mouse_filter = Control.MOUSE_FILTER_STOP
 	UIStyle.apply(self, _vars)
@@ -220,6 +281,18 @@ func _rebuild() -> void:
 		_scroll = null
 	_update_layout()
 	call_deferred("_update_layout")
+	if keep_scroll > 0 and is_instance_valid(_scroll):
+		_scroll.scroll_vertical = keep_scroll    # 先同步恢复一次，多数情况当帧就位
+		_pending_scroll = keep_scroll            # 若布局未算完被夹到 0，随后几帧再补
+		_pending_left = 6
+
+func _process(_delta: float) -> void:
+	if _pending_scroll >= 0 and is_instance_valid(_scroll):
+		_scroll.scroll_vertical = _pending_scroll
+		if _scroll.scroll_vertical == _pending_scroll or _pending_left <= 0:
+			_pending_scroll = -1
+		else:
+			_pending_left -= 1
 
 func _build_shop() -> void:
 	var shop: Dictionary = _catalog.get("SHOP", {})
@@ -444,10 +517,16 @@ func _bar_set() -> Dictionary:
 		for key in _state.get("inv", {}):
 			var item: Dictionary = _catalog.get("SHOP", {}).get(key, {})
 			if int(_state.inv[key]) <= 0 or item.is_empty(): continue
+			# 佩饰/家具/装饰不是"喂给宠物用"的道具（各有自己的页面：🎀 佩饰 / 🛋️ 房间），
+			# 混在道具栏里点了只会白消耗，所以这里不列
+			if _is_place_or_wear(item): continue
 			if item.get("only", "") != "" and item.only != pet.get("species", ""): continue
 			if item.get("onlyKind", "") == "ai" and not species.get("ai", false): continue
 			keys.append(str(key))
 	return {"kind": kind, "label": label, "act": act, "keys": keys, "empty": empty}
+
+func _is_place_or_wear(item: Dictionary) -> bool:
+	return item.has("wear") or item.has("furn") or item.has("deco")
 
 func _bar_extras(kind: String) -> Array[Dictionary]:
 	var extras: Array[Dictionary] = []
