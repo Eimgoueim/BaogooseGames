@@ -575,7 +575,7 @@ func _bar_button(text: String, action: String) -> Button:
 	normal.content_margin_left = 9
 	normal.content_margin_right = 9
 	button.add_theme_stylebox_override("normal", normal)
-	button.add_theme_font_size_override("font_size", 11)
+	button.add_theme_font_size_override("font_size", UIStyle.readable_font_size(11))
 	return button
 
 func _emit_action(action: String) -> void:

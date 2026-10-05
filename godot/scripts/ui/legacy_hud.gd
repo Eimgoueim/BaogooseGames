@@ -99,7 +99,7 @@ func _update_left(state: Dictionary) -> void:
 	_left.add_child(head)
 	var pet_name := str(pet.get("name", "??"))
 	var name_label := Style.label(pet_name, 15)
-	name_label.add_theme_font_size_override("font_size", 15)
+	name_label.add_theme_font_size_override("font_size", 20)
 	name_label.add_theme_color_override("font_color", Color.WHITE)
 	name_label.custom_minimum_size.x = 42.0
 	name_label.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
@@ -147,13 +147,13 @@ func _add_stat(parent: VBoxContainer, key: String, emoji: String, value: float, 
 	row.add_theme_constant_override("separation", 4)
 	parent.add_child(row)
 	var icon := Style.label(emoji, 9)
-	icon.custom_minimum_size = Vector2(13, 11)
+	icon.custom_minimum_size = Vector2(20, 18)
 	icon.tooltip_text = (description if not description.is_empty() else key) + "：" + str(roundi(value)) + "%"
 	row.add_child(icon)
 	var bar := HBoxContainer.new()
 	bar.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	bar.add_theme_constant_override("separation", 1)
-	bar.custom_minimum_size = Vector2(74, 6)
+	bar.custom_minimum_size = Vector2(109, 9)
 	row.add_child(bar)
 	var on_cells := roundi(clampf(value, 0.0, 100.0) / 100.0 * 10.0)
 	var tone := ""
@@ -168,7 +168,7 @@ func _add_stat(parent: VBoxContainer, key: String, emoji: String, value: float, 
 	for index in range(10):
 		var cell := ColorRect.new()
 		cell.mouse_filter = Control.MOUSE_FILTER_IGNORE
-		cell.custom_minimum_size = Vector2(6.5, 6)
+		cell.custom_minimum_size = Vector2(10, 9)
 		cell.color = _bar_color(tone) if index < on_cells else Color(1.0, 1.0, 1.0, 0.16)
 		bar.add_child(cell)
 
@@ -182,7 +182,7 @@ func _add_resource(parent: HFlowContainer, emoji: String, value: String) -> void
 	var icon := Style.label(emoji, 10)
 	chip.add_child(icon)
 	var amount := Style.label(value, 10)
-	amount.add_theme_font_size_override("font_size", 10)
+	amount.add_theme_font_size_override("font_size", 15)
 	chip.add_child(amount)
 	panel.add_child(chip)
 	parent.add_child(panel)
@@ -214,7 +214,7 @@ func _update_slots(state: Dictionary) -> void:
 		slot.flat = true
 		slot.focus_mode = Control.FOCUS_NONE
 		slot.mouse_filter = Control.MOUSE_FILTER_STOP
-		slot.custom_minimum_size = Vector2(0, 30)
+		slot.custom_minimum_size = Vector2(0, 64)
 		slot.add_theme_stylebox_override("normal", Style.panel_style(Color.TRANSPARENT, Color.TRANSPARENT, 6))
 		slot.add_theme_stylebox_override("hover", Style.panel_style(Color(1.0, 1.0, 1.0, 0.06), Color.TRANSPARENT, 6))
 		slot.add_theme_stylebox_override("pressed", Style.panel_style(Color(1.0, 1.0, 1.0, 0.1), Color.TRANSPARENT, 6))
@@ -249,18 +249,18 @@ func _update_slots(state: Dictionary) -> void:
 		slot.add_child(layout)
 		var thumbnail := PetPixel.new()
 		thumbnail.mouse_filter = Control.MOUSE_FILTER_IGNORE
-		thumbnail.custom_minimum_size = Vector2(15, 15)
+		thumbnail.custom_minimum_size = Vector2(24, 24)
 		thumbnail.commands = _pet_commands(pet)
 		layout.add_child(thumbnail)
 		var pet_label := Style.label(str(pet.get("name", "??")), 7)
-		pet_label.add_theme_font_size_override("font_size", 7)
+		pet_label.add_theme_font_size_override("font_size", 14)
 		pet_label.custom_minimum_size = Vector2(0, 8)
 		pet_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 		pet_label.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
 		layout.add_child(pet_label)
 		var suffix := "💤" if bool(pet.get("asleep", false)) else ""
 		var level := Style.label("Lv.%d%s" % [int(pet.get("level", 0)), suffix], 6, Color("#ffe9a8"))
-		level.add_theme_font_size_override("font_size", 6)
+		level.add_theme_font_size_override("font_size", 14)
 		level.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 		layout.add_child(level)
 		slot.tooltip_text = "%s Lv.%d · ❤️%s%% ⚡%s%%" % [str(pet.get("name", "??")), int(pet.get("level", 0)), str(roundi(float(pet.get("health", 0)))), str(roundi(float(pet.get("energy", 0))))]
@@ -347,14 +347,14 @@ func _layout() -> void:
 	_left.position = Vector2(12.0, _last_top_ui)
 	_left.size = Vector2(left_width, maxf(0.0, viewport_size.y - _last_top_ui))
 	var narrow := viewport_size.x <= 560.0
-	var right_width := viewport_size.x * (0.70 if narrow else 0.32)
+	var right_width := minf(viewport_size.x * 0.44, 210.0) if narrow else viewport_size.x * 0.32
 	if not narrow:
-		right_width = minf(right_width, 168.0)
+		right_width = minf(right_width, 360.0)
 	_slots.columns = 3 if narrow else 6
 	_slots_title.position = Vector2(viewport_size.x - right_width - 2.0, _last_top_ui)
-	_slots_title.size = Vector2(right_width, 11.0)
-	_slots.position = Vector2(viewport_size.x - right_width - 2.0, _last_top_ui + 11.0)
-	_slots.size = Vector2(right_width, 70.0)
+	_slots_title.size = Vector2(right_width, 22.0)
+	_slots.position = Vector2(viewport_size.x - right_width - 2.0, _last_top_ui + 24.0)
+	_slots.size = Vector2(right_width, 132.0)
 	for child: Control in _slots.get_children():
 		child.custom_minimum_size.x = 0.0
 		child.size_flags_horizontal = Control.SIZE_EXPAND_FILL

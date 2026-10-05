@@ -95,14 +95,14 @@ func _ready() -> void:
 	_hint_label = Label.new()
 	_hint_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	_hint_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	_hint_label.add_theme_font_size_override("font_size", 13)
+	_hint_label.add_theme_font_size_override("font_size", 16)
 	_hint_label.add_theme_color_override("font_color", Color("#ddd9ef"))
 	add_child(_hint_label)
 	_message_label = Label.new()
 	_message_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	_message_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	_message_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	_message_label.add_theme_font_size_override("font_size", 12)
+	_message_label.add_theme_font_size_override("font_size", 16)
 	_message_label.add_theme_color_override("font_color", Color("#ffe9a8"))
 	add_child(_message_label)
 

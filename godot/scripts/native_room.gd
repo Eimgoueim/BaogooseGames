@@ -237,6 +237,8 @@ func create_room() -> void:
 	add_child(lcd)
 	lcd.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	hint = Style.label("拖动宠物陪它玩（它会不耐烦）· 点房间抚摸 · 点屏幕上图标用功能", 10, Color.WHITE)
+	hint.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	hint.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	hint.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	add_child(hint)
 	music_button = Style.button("🎵", "bgm", handle, Renderer.theme_vars(state, catalog))
@@ -280,7 +282,8 @@ func refresh_ui() -> void:
 	if not page_key.is_empty(): pages.show_page(page_key, state, ui_catalog, art, float(renderer.layout.top_ui))
 	else: pages.close_page()
 	pages.refresh_usebar(page_key, not page_key.is_empty() or not modal_key.is_empty(), state, ui_catalog, vars)
-	hint.position = Vector2(maxf(0, (size.x - hint.size.x) / 2), size.y - 89)
+	hint.size = Vector2(size.x * 0.88, 44)
+	hint.position = Vector2(size.x * 0.06, size.y - 94)
 	hint.text = "拖动家具摆放 · 滚轮或按钮缩放 · 点空处取消选中" if state.edit else "拖动宠物陪它玩（它会不耐烦）· 点房间抚摸 · 点屏幕上图标用功能"
 	music_button.position = Vector2(10, size.y - 134)
 	music_button.text = "🎵" if state.bgm else "🔇"

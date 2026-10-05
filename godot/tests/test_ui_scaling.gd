@@ -20,6 +20,10 @@ func _check_scale(app: Control) -> void:
 	var actual := root.get_stretch_transform().get_scale()
 	_check(absf(actual.x - expected) < 0.01 and absf(actual.y - expected) < 0.01, "字体与控件应等比缩放：%s，实际 %s" % [root.size, actual])
 	_check((app.size * expected - Vector2(root.size)).length() < 3, "界面应填满窗口，不能拉伸变形或出现黑边")
+	for label: Label in app.find_children("*", "Label", true, false):
+		_check(label.get_theme_font_size("font_size") >= 14, "UI 文字不能退回难以阅读的小字号：" + label.text)
+	var slots: GridContainer = app.hud.get("_slots")
+	_check(slots.get_global_rect().end.x <= app.size.x + 1, "加大字体后宠物栏不能溢出右边界")
 	print("UI 尺寸：", root.size, "，逻辑尺寸：", app.size, "，缩放：", actual)
 
 func _run() -> void:

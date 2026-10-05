@@ -1,12 +1,16 @@
 class_name LegacyUIStyle
 extends RefCounted
 
+# 紧凑版 6–12px 字号即使随全屏放大仍偏小，正文统一保留可读下限。
+static func readable_font_size(size: int) -> int:
+	return maxi(14, roundi(size * 1.25))
+
 static func apply(control: Control, vars: Dictionary) -> void:
 	var theme := Theme.new()
 	var font := SystemFont.new()
 	font.font_names = PackedStringArray(["Microsoft YaHei", "微软雅黑", "Segoe UI", "Segoe UI Emoji"])
 	theme.default_font = font
-	theme.default_font_size = 12
+	theme.default_font_size = readable_font_size(12)
 	theme.set_color("font_color", "Label", _color(vars, "--ink", Color("#2c2b3d")))
 	theme.set_color("font_color", "Button", Color.WHITE)
 	control.theme = theme
@@ -24,7 +28,7 @@ static func button(text: String, action: String, emit: Callable, vars: Dictionar
 	result.text = text
 	result.focus_mode = Control.FOCUS_NONE
 	result.mouse_filter = Control.MOUSE_FILTER_STOP
-	result.add_theme_font_size_override("font_size", 10)
+	result.add_theme_font_size_override("font_size", readable_font_size(10))
 	result.add_theme_color_override("font_color", Color.WHITE)
 	result.add_theme_color_override("font_hover_color", Color.WHITE)
 	result.add_theme_stylebox_override("normal", panel_style(Color(0.12, 0.09, 0.21, 0.42), Color.TRANSPARENT, 8))
@@ -41,7 +45,7 @@ static func card_button(text: String, action: String, emit: Callable, vars: Dict
 	result.text = text
 	result.focus_mode = Control.FOCUS_NONE
 	result.mouse_filter = Control.MOUSE_FILTER_STOP
-	result.add_theme_font_size_override("font_size", 12)
+	result.add_theme_font_size_override("font_size", readable_font_size(12))
 	var ink := _color(vars, "--ink", Color("#2c2b3d"))
 	var accent := _color(vars, "--purple", Color("#8b7bff"))
 	var base := accent if primary else _color(vars, "--btn", Color("#f4f2fd"))
@@ -64,7 +68,7 @@ static func card_button(text: String, action: String, emit: Callable, vars: Dict
 static func label(text: String, size: int = 12, color: Color = Color.WHITE) -> Label:
 	var result := Label.new()
 	result.text = text
-	result.add_theme_font_size_override("font_size", size)
+	result.add_theme_font_size_override("font_size", readable_font_size(size))
 	result.add_theme_color_override("font_color", color)
 	if color == Color.WHITE:
 		result.add_theme_color_override("font_shadow_color", Color(0.08, 0.05, 0.17, 0.8))
