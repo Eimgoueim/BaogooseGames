@@ -27,6 +27,7 @@ var _viewport_size := Vector2(1120, 960)
 var _top_ui := 96.0
 var _usebar: PanelContainer
 var _use_track: HBoxContainer
+var _use_middle: HBoxContainer    # 中间内容层：可伸缩 + 裁切，保证两端箭头永远可见
 var _use_page := 0
 var _use_kind := ""
 var _signature := ""            # 页面内容指纹：没变就不重建（否则每帧重建会让滚动条跳回顶部）
@@ -88,6 +89,7 @@ func close_page() -> void:
 	_scroll = null
 	_usebar = null
 	_use_track = null
+	_use_middle = null
 
 func refresh_usebar(page: String, any_open: bool, state: Dictionary, catalog: Dictionary, vars: Dictionary) -> void:
 	_page = page
@@ -99,6 +101,7 @@ func refresh_usebar(page: String, any_open: bool, state: Dictionary, catalog: Di
 		if is_instance_valid(_usebar): _usebar.queue_free()
 		_usebar = null
 		_use_track = null
+		_use_middle = null
 		return
 	if not is_instance_valid(_usebar):
 		_usebar = PanelContainer.new()
@@ -129,29 +132,33 @@ func refresh_usebar(page: String, any_open: bool, state: Dictionary, catalog: Di
 	var size := maxi(3, int(floor((maxf(320.0, vp.x) - 112.0) / 92.0)))
 	var pages := maxi(1, int(ceil(float(bar_data.keys.size()) / size)))
 	_use_page = clampi(_use_page, 0, pages - 1)
-	if pages > 1:
-		_add_text_to(_use_track, str(bar_data.label) + " " + str(_use_page + 1) + "/" + str(pages), 10, Color(1, 1, 1, 0.82))
+	# 左箭头固定在栏的最左端
 	var previous := _bar_button("‹", "useleft")
 	previous.custom_minimum_size = Vector2(30, 30)
 	previous.disabled = _use_page <= 0
 	_use_track.add_child(previous)
-	var left_space := Control.new()
-	left_space.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	_use_track.add_child(left_space)
+	# 中间层：吃掉剩余宽度并裁切，道具名再长也只会裁中间，不会把两侧箭头挤出屏幕
+	_use_middle = HBoxContainer.new()
+	_use_middle.add_theme_constant_override("separation", 5)
+	_use_middle.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_use_middle.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	_use_middle.alignment = BoxContainer.ALIGNMENT_CENTER
+	_use_middle.clip_contents = true
+	_use_track.add_child(_use_middle)
+	if pages > 1:
+		_add_text_to(_use_middle, str(bar_data.label) + " " + str(_use_page + 1) + "/" + str(pages), 10, Color(1, 1, 1, 0.82))
 	for extra in _bar_extras(str(bar_data.kind)):
 		var b := _bar_button(str(extra.text), str(extra.action))
 		b.custom_minimum_size = Vector2(0, 30)
 		b.disabled = _as_bool(extra.get("disabled", false))
-		_use_track.add_child(b)
+		_use_middle.add_child(b)
 	if bar_data.keys.is_empty():
-		_add_text_to(_use_track, str(bar_data.empty), 10, Color(1, 1, 1, 0.82))
+		_add_text_to(_use_middle, str(bar_data.empty), 10, Color(1, 1, 1, 0.82))
 	else:
 		for key in bar_data.keys.slice(_use_page * size, mini(bar_data.keys.size(), (_use_page + 1) * size)):
 			var chip := _bar_chip(str(bar_data.kind), str(key))
-			_use_track.add_child(chip)
-	var right_space := Control.new()
-	right_space.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	_use_track.add_child(right_space)
+			_use_middle.add_child(chip)
+	# 右箭头固定在栏的最右端
 	var next := _bar_button("›", "useright")
 	next.custom_minimum_size = Vector2(30, 30)
 	next.disabled = _use_page >= pages - 1
