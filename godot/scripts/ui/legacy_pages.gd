@@ -29,11 +29,34 @@ var _usebar: PanelContainer
 var _use_track: HBoxContainer
 var _use_page := 0
 var _use_kind := ""
+var _signature := ""            # 页面内容指纹：没变就不重建（否则每帧重建会让滚动条跳回顶部）
+var _pending_scroll := -1       # 重建后待恢复的滚动位置
+var _pending_left := 0
 
 func _ready() -> void:
 	mouse_filter = Control.MOUSE_FILTER_IGNORE
 	set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	_update_layout()
+
+func _page_signature() -> String:
+	var st := _state
+	var species := ""
+	var levels := 0
+	for p in st.get("pets", []):
+		species += str(p.get("species", "")) + ","
+		levels += int(p.get("level", 1))
+	match _page:
+		"shop":
+			return str(st.get("coins"), st.get("inv"), st.get("furnOwn"), st.get("decos"), st.get("wear"),
+				st.get("collection"), st.get("seenItems"), st.get("hasToy"), species, levels)
+		"gacha":
+			return str(st.get("coins"), st.get("points"), st.get("pity"), st.get("pulls"),
+				st.get("collection"), st.get("decos"), st.get("wear"), st.get("furnOwn"), st.get("hasToy"))
+		"points":
+			return str(st.get("points"), st.get("coins"), st.get("title"), st.get("decor"),
+				st.get("memoUnlocked"), st.get("shards"), st.get("grave"))
+		_:
+			return str(st)
 
 func show_page(page: String, state: Dictionary, catalog: Dictionary, art: Dictionary, top_ui: float) -> void:
 	_page = page
@@ -43,10 +66,17 @@ func show_page(page: String, state: Dictionary, catalog: Dictionary, art: Dictio
 	_top_ui = top_ui
 	_vars = _theme_vars()
 	visible = true
+	var sig := str(page, "|", top_ui, "|", _page_signature(), "|", str(_vars).hash())
+	if sig == _signature and is_instance_valid(_scroll):
+		_update_layout()      # 内容没变：只更新布局，保住滚动位置
+		return
+	_signature = sig
 	_rebuild()
 	_update_layout()
 
 func close_page() -> void:
+	_signature = ""
+	_pending_scroll = -1
 	_page = ""
 	refresh_usebar("", false, {}, _catalog, _vars)
 	visible = false
@@ -157,6 +187,9 @@ func _theme_vars() -> Dictionary:
 	return theme.get("vars", {})
 
 func _rebuild() -> void:
+	var keep_scroll := 0
+	if is_instance_valid(_scroll):
+		keep_scroll = _scroll.scroll_vertical
 	for child in get_children():
 		remove_child(child)
 		child.queue_free()
@@ -220,6 +253,18 @@ func _rebuild() -> void:
 		_scroll = null
 	_update_layout()
 	call_deferred("_update_layout")
+	if keep_scroll > 0 and is_instance_valid(_scroll):
+		_scroll.scroll_vertical = keep_scroll    # 先同步恢复一次，多数情况当帧就位
+		_pending_scroll = keep_scroll            # 若布局未算完被夹到 0，随后几帧再补
+		_pending_left = 6
+
+func _process(_delta: float) -> void:
+	if _pending_scroll >= 0 and is_instance_valid(_scroll):
+		_scroll.scroll_vertical = _pending_scroll
+		if _scroll.scroll_vertical == _pending_scroll or _pending_left <= 0:
+			_pending_scroll = -1
+		else:
+			_pending_left -= 1
 
 func _build_shop() -> void:
 	var shop: Dictionary = _catalog.get("SHOP", {})
