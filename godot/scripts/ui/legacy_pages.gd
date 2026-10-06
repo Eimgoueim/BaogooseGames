@@ -27,7 +27,8 @@ var _viewport_size := Vector2(1120, 960)
 var _top_ui := 96.0
 var _usebar: PanelContainer
 var _use_track: HBoxContainer
-var _use_middle: HBoxContainer    # 中间内容层：可伸缩 + 裁切，保证两端箭头永远可见
+var _use_middle: HBoxContainer    # 中间内容层（放在 ScrollContainer 里，最小宽度不参与底栏尺寸计算）
+var _use_scroll: ScrollContainer  # 关键：ScrollContainer 的最小尺寸是 0，道具再多也不会把箭头挤出视口
 var _bar_signature := ""           # 道具栏内容指纹：没变就不重建按钮
 var _use_page := 0
 var _use_kind := ""
@@ -91,6 +92,7 @@ func close_page() -> void:
 	_usebar = null
 	_use_track = null
 	_use_middle = null
+	_use_scroll = null
 
 func refresh_usebar(page: String, any_open: bool, state: Dictionary, catalog: Dictionary, vars: Dictionary) -> void:
 	_page = page
@@ -103,6 +105,7 @@ func refresh_usebar(page: String, any_open: bool, state: Dictionary, catalog: Di
 		_usebar = null
 		_use_track = null
 		_use_middle = null
+		_use_scroll = null
 		_bar_signature = ""
 		return
 	if not is_instance_valid(_usebar):
@@ -139,7 +142,7 @@ func refresh_usebar(page: String, any_open: bool, state: Dictionary, catalog: Di
 		"|", str(_state.get("edit")), "|", str(_state.get("coins")), "|", str(_state.get("points")),
 		"|", str(_active_pet(_state.get("pets", [])).get("asleep", false)))
 	if sig == _bar_signature and is_instance_valid(_use_track) and is_instance_valid(_use_middle) \
-		and _use_track.get_child_count() >= 3 and _use_middle.get_child_count() > 0:
+		and is_instance_valid(_use_scroll) and _use_track.get_child_count() >= 3 and _use_middle.get_child_count() > 0:
 		return
 	_bar_signature = sig
 	for child in _use_track.get_children():
@@ -160,7 +163,20 @@ func refresh_usebar(page: String, any_open: bool, state: Dictionary, catalog: Di
 	_use_middle.size_flags_vertical = Control.SIZE_SHRINK_CENTER
 	_use_middle.alignment = BoxContainer.ALIGNMENT_CENTER
 	_use_middle.clip_contents = true
-	_use_track.add_child(_use_middle)
+	# 关键：中间内容放进 ScrollContainer 再挂到轨道上。
+	# ScrollContainer 的最小尺寸是 0，不会把底栏撑到视口之外；
+	# 否则中间层的最小宽度（所有道具胶囊之和）会把右箭头推到视口外面，看不见也点不到。
+	_use_scroll = ScrollContainer.new()
+	# SHOW_NEVER（不是 DISABLED）：允许滚动但不显示滚动条，最小尺寸为 0，
+	# 这样中间内容再宽也不会撑大底栏、把两侧箭头挤出视口。
+	_use_scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_SHOW_NEVER
+	_use_scroll.vertical_scroll_mode = ScrollContainer.SCROLL_MODE_SHOW_NEVER
+	_use_scroll.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_use_scroll.custom_minimum_size = Vector2(0, 30)
+	_use_scroll.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	_use_scroll.clip_contents = true
+	_use_scroll.add_child(_use_middle)
+	_use_track.add_child(_use_scroll)
 	if pages > 1:
 		_add_text_to(_use_middle, str(bar_data.label) + " " + str(_use_page + 1) + "/" + str(pages), 10, Color(1, 1, 1, 0.82))
 	for extra in _bar_extras(str(bar_data.kind)):

@@ -63,9 +63,15 @@ func _run() -> void:
 	var mid: HBoxContainer = pages.get("_use_middle")
 	_check(mid != null, "使用栏应有中间内容层")
 	if mid != null:
-		_check(mid.clip_contents, "中间内容层必须开启 clip_contents（否则长道具名会挤掉箭头）")
-		_check(mid.size.x <= bar.size.x - 60.0 + 2.0,
-			"中间层宽度不应超过「栏宽 - 两个箭头」（中间 %.1f，栏 %.1f）" % [mid.size.x, bar.size.x])
+		_check(mid.clip_contents, "中间内容层必须开启 clip_contents")
+
+	# 关键回归：中间内容再宽，也不能把底栏撑出视口、把箭头挤出屏幕
+	# （历史上中间层最小宽度会把底栏撑到 1557，右箭头跑到 x=1521 = 视口外，看不见也点不到）
+	var vp := app.get_viewport_rect().size
+	_check(bar.size.x <= vp.x + 0.5,
+		"底栏宽度不应超过视口宽度（栏 %.1f，视口 %.1f）" % [bar.size.x, vp.x])
+	_check(right.global_position.x + right.size.x <= vp.x + 0.5,
+		"右箭头必须落在视口内（右缘 %.1f，视口宽 %.1f）" % [right.global_position.x + right.size.x, vp.x])
 
 	# 翻页功能仍正常
 	var left0 := (pages.get("_use_track") as HBoxContainer).get_child(0) as Button
