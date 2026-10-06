@@ -272,6 +272,9 @@ func _build_theme() -> void:
 		var theme: Dictionary = themes.get(key, {})
 		var btn := _button("", "theme:" + key)
 		btn.custom_minimum_size = Vector2(0, 95)
+		# 必须横向撑满所在网格列，否则卡片只占自身最小宽度、全挤在左边
+		btn.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		btn.size_flags_vertical = Control.SIZE_EXPAND_FILL
 		var theme_vars: Dictionary = theme.get("vars", {})
 		var is_current: bool = str(key) == current_theme and current_accent.is_empty()
 		var theme_bg := _dict_color(theme_vars, "--btn", "#f4f2fd") if is_current else _dict_color(theme_vars, "--soft", "#faf9ff")
