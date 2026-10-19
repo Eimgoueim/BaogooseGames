@@ -101,6 +101,42 @@ func _run() -> void:
 		dungeon._process_foes(0.05, room)
 	_check(int(dungeon.get("hp")) == before_hp, "进门无敌期内不应掉血（%d -> %d）" % [before_hp, int(dungeon.get("hp"))])
 
+	# ⑥ 玩家不应陷进墙角（非门口位置按身体半径夹住），但仍能走到门口缝隙
+	var player_body := 6.0
+	dungeon.player = Vector2(2, 2)          # 强行塞进左下角
+	dungeon._update_game(0.016)
+	_check(float(dungeon.player.x) >= Dungeon.WALL + player_body - 0.01,
+		"玩家在墙角不应陷进墙里（x=%.1f，期望 >= %.1f）" % [dungeon.player.x, Dungeon.WALL + player_body])
+	_check(float(dungeon.player.y) >= Dungeon.WALL + player_body - 0.01,
+		"玩家在墙角不应陷进墙里（y=%.1f，期望 >= %.1f）" % [dungeon.player.y, Dungeon.WALL + player_body])
+	# 门口缝隙处仍应允许贴到墙线（否则进不了门）。
+	# 注意：如果这个房间北边有门，玩家会直接切到下一个房间（落点在对侧墙边），也算正确。
+	var room_before := str(dungeon.get("current"))
+	dungeon.player = Vector2(Dungeon.LOGICAL.x / 2, 2)
+	dungeon._update_game(0.016)
+	if str(dungeon.get("current")) == room_before:
+		_check(absf(float(dungeon.player.y) - Dungeon.WALL) <= 1.0,
+			"正对门口时玩家应能贴到墙线以便进门（y=%.1f）" % dungeon.player.y)
+
+	# ⑦ 怪物在门口后退时不应来回抽动（滞回：进 18 出 30）
+	room.foes = [{"kind": "blob", "x": Dungeon.LOGICAL.x / 2, "y": Dungeon.WALL + 2, "hp": 99, "t": 0.0, "vx": 0.0, "vy": 0.0, "hit": 0.0, "repel": false}]
+	var last_y: float = float(room.foes[0].y)
+	var last_sign := 0
+	var flips := 0
+	for _i in 60:
+		dungeon._process_foes(0.02, room)
+		if room.foes.is_empty():
+			break
+		var now_y: float = float(room.foes[0].y)
+		var dy: float = now_y - last_y
+		var sign_now := 0 if absf(dy) < 0.0001 else (1 if dy > 0 else -1)
+		if sign_now != 0 and last_sign != 0 and sign_now != last_sign:
+			flips += 1
+		if sign_now != 0:
+			last_sign = sign_now
+		last_y = now_y
+	_check(flips <= 2, "怪物在门口后退不应来回抽动（方向翻转 %d 次）" % flips)
+
 	_end()
 
 func _end() -> void:

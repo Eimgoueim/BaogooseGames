@@ -375,8 +375,16 @@ func _update_game(dt: float) -> void:
 		move = move.normalized()
 		face = ("e" if move.x > 0 else "w") if absf(move.x) > absf(move.y) else ("s" if move.y > 0 else "n")
 		player += move * float(bonus.move) * dt
-	player.x = clampf(player.x, WALL, LOGICAL.x - WALL)
-	player.y = clampf(player.y, WALL, LOGICAL.y - WALL)
+	# 只有正对门口缝隙时才允许贴到墙线（进/出房间需要），其余位置按身体半径夹住。
+	# 否则玩家在非门口处也能贴到墙线，半个身子陷进墙里（墙角尤其明显）。
+	var body_p := 6.0
+	var door_gap := 22.0
+	var in_door_x := absf(player.x - LOGICAL.x / 2) < door_gap
+	var in_door_y := absf(player.y - LOGICAL.y / 2) < door_gap
+	var pad_x := 0.0 if in_door_y else body_p
+	var pad_y := 0.0 if in_door_x else body_p
+	player.x = clampf(player.x, WALL + pad_x, LOGICAL.x - WALL - pad_x)
+	player.y = clampf(player.y, WALL + pad_y, LOGICAL.y - WALL - pad_y)
 	# 原版移动后立即检查换层与过门；切换成功就返回，不再更新旧房间。
 	if room.get("trapdoor", {}).size() > 0 and player.distance_to(Vector2(room.trapdoor.x, room.trapdoor.y)) < 12:
 		_next_floor()
@@ -473,36 +481,45 @@ func _process_foes(dt: float, room: Dictionary) -> void:
 		foe.t -= dt
 		var delta := player - Vector2(foe.x, foe.y)
 		var distance := maxf(delta.length(), 1)
-		# 门口安全区：在门口附近的敌人只往房间中心退，不再追玩家。
-		# 否则它会一边被推离门口、一边又追玩家，卡在墙边抖动（玩家看到的就是"卡墙上"），
-		# 而且一进门就会被贴着门的敌人打到（"开门杀"）。
-		var in_door_zone := _near_door(Vector2(foe.x, foe.y), 18.0)
-		if in_door_zone:
-			var back := LOGICAL * 0.5 - Vector2(foe.x, foe.y)
-			if back.length() > 0.01:
-				foe.x += back.normalized().x * 90 * dt
-				foe.y += back.normalized().y * 90 * dt
-		elif foe.kind == "blob":
-			foe.x += delta.x / distance * 26 * dt; foe.y += delta.y / distance * 26 * dt
+		var dir := delta / distance
+		# 本帧想怎么走（按类型）。射击和大招单独在下面处理，移动/射击解耦。
+		var step := Vector2.ZERO
+		if foe.kind == "blob":
+			step = dir * 26.0
+		elif foe.kind == "boss":
+			step = dir * 20.0
 		elif foe.kind == "fly":
 			if is_zero_approx(foe.vx) and is_zero_approx(foe.vy):
 				var angle := rng.randf_range(0, TAU); foe.vx = cos(angle) * 48; foe.vy = sin(angle) * 48
-			foe.x += foe.vx * dt; foe.y += foe.vy * dt
+			step = Vector2(foe.vx, foe.vy)
 			if foe.x < WALL + 6 or foe.x > LOGICAL.x - WALL - 6: foe.vx *= -1
 			if foe.y < WALL + 6 or foe.y > LOGICAL.y - WALL - 6: foe.vy *= -1
-		elif foe.kind == "shooter" and foe.t <= 0:
+		# 门口安全区：先预测"下一帧位置"，会踏进安全区就停住（贴着安全区边缘），
+		# 只有已经陷在安全区里才往房间中心退。这样玩家站在门口时怪也不会来回抽动。
+		var door_ring := 26.0
+		var here := Vector2(foe.x, foe.y)
+		if _near_door(here + step * dt, door_ring):
+			if _near_door(here, door_ring):
+				var back := LOGICAL * 0.5 - here
+				if back.length() > 0.01: step = back.normalized() * 90.0
+			else:
+				step = Vector2.ZERO
+			if foe.kind == "fly":
+				foe.vx = -foe.vx
+				foe.vy = -foe.vy
+		foe.x += step.x * dt
+		foe.y += step.y * dt
+		if foe.kind == "shooter" and foe.t <= 0:
 			foe.t = 2
-			var angle := atan2(delta.y, delta.x)
-			foe_shots.append({"x":foe.x, "y":foe.y, "vx":cos(angle) * 74, "vy":sin(angle) * 74, "life":3.0})
-		elif foe.kind == "boss":
-			foe.x += delta.x / distance * 20 * dt; foe.y += delta.y / distance * 20 * dt
-			if foe.t <= 0:
-				foe.t = 2.4
-				var count := 6 if floor >= 3 else 5
-				var speed := 60.0 if floor >= 3 else 52.0
-				for i in count:
-					var angle := float(i) / count * TAU + elapsed
-					foe_shots.append({"x":foe.x, "y":foe.y, "vx":cos(angle) * speed, "vy":sin(angle) * speed, "life":3.0})
+			var shot_angle := atan2(delta.y, delta.x)
+			foe_shots.append({"x":foe.x, "y":foe.y, "vx":cos(shot_angle) * 74, "vy":sin(shot_angle) * 74, "life":3.0})
+		elif foe.kind == "boss" and foe.t <= 0:
+			foe.t = 2.4
+			var count := 6 if floor >= 3 else 5
+			var shot_speed := 60.0 if floor >= 3 else 52.0
+			for i in count:
+				var ring_angle := float(i) / count * TAU + elapsed
+				foe_shots.append({"x":foe.x, "y":foe.y, "vx":cos(ring_angle) * shot_speed, "vy":sin(ring_angle) * shot_speed, "life":3.0})
 		# 按"身体半径"把敌人夹进房间：以前只夹中心到 WALL+4，身体半径约 9px，
 		# 于是半个身子会陷进墙里（玩家看到的就是"怪卡在墙上"）
 		var body := 15.0 if foe.kind == "boss" else (6.0 if foe.kind == "fly" else 9.0)
