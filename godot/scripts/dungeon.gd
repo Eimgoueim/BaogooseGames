@@ -68,6 +68,10 @@ var chest_got := 0
 var cleared_rooms := 0
 var bonus := {"dmg":1, "cd":0.3, "speed":160.0, "spread":1, "pierce":0, "move":62.0, "size":2.0}
 var keys: Dictionary = {}
+# 手柄左摇杆的静止偏移（自动校准）。很多手柄静止时会漂移 0.3~0.5，
+# 超过死区就会让主角"自己走路"（顶到墙上后垂直方向被漂移占住，只剩左右能动）。
+var stick_bias := Vector2.ZERO
+var bias_frames := 0
 var mouse_aim := Vector2.ZERO
 var mouse_firing := false
 var pet_color := Color.WHITE
@@ -166,6 +170,8 @@ func start_run() -> bool:
 	ended = false
 	win = false
 	bonus = {"dmg":1, "cd":0.3, "speed":160.0, "spread":1, "pierce":0, "move":62.0, "size":2.0}
+	stick_bias = Vector2.ZERO
+	bias_frames = 0
 	shots.clear()
 	foe_shots.clear()
 	picks.clear()
@@ -347,6 +353,21 @@ func _to_logical(point: Vector2) -> Vector2:
 	if _view_rect.size.x <= 0 or _view_rect.size.y <= 0: return Vector2.ZERO
 	return Vector2((point.x - _view_rect.position.x) * LOGICAL.x / _view_rect.size.x, (point.y - _view_rect.position.y) * LOGICAL.y / _view_rect.size.y)
 
+# 手柄左摇杆 → 移动量：先减掉静止偏移，再用死区过滤。
+# 开局前 40 帧累计静止位置作为偏移量，之后自动扣掉，摇杆漂移就不会再让主角自己走。
+func stick_value(raw: Vector2) -> Vector2:
+	if bias_frames < 40:
+		stick_bias = (stick_bias * float(bias_frames) + raw) / float(bias_frames + 1)
+		bias_frames += 1
+	var v := raw - stick_bias
+	# 减掉偏移后重缩放，保证满推摇杆仍是满速（否则漂移越大，能推到的最大速度越小）
+	v.x = v.x / maxf(0.4, 1.0 - absf(stick_bias.x))
+	v.y = v.y / maxf(0.4, 1.0 - absf(stick_bias.y))
+	if absf(v.x) <= 0.30: v.x = 0.0
+	if absf(v.y) <= 0.30: v.y = 0.0
+	if v.length() > 1.0: v = v.normalized()
+	return v
+
 func _update_game(dt: float) -> void:
 	var room: Dictionary = rooms.get(current, {})
 	if room.is_empty(): return
@@ -361,11 +382,8 @@ func _update_game(dt: float) -> void:
 	var devices := Input.get_connected_joypads()
 	if not devices.is_empty():
 		var device: int = devices[0]
-		var joy_x := Input.get_joy_axis(device, JOY_AXIS_LEFT_X)
-		var joy_y := Input.get_joy_axis(device, JOY_AXIS_LEFT_Y)
-		if absf(joy_x) <= 0.25: joy_x = 0
-		if absf(joy_y) <= 0.25: joy_y = 0
-		move += Vector2(joy_x, joy_y)
+		var raw_stick := Vector2(Input.get_joy_axis(device, JOY_AXIS_LEFT_X), Input.get_joy_axis(device, JOY_AXIS_LEFT_Y))
+		move += stick_value(raw_stick)
 		if Input.is_joy_button_pressed(device, JOY_BUTTON_DPAD_LEFT): move.x = -1
 		if Input.is_joy_button_pressed(device, JOY_BUTTON_DPAD_RIGHT): move.x = 1
 		if Input.is_joy_button_pressed(device, JOY_BUTTON_DPAD_UP): move.y = -1

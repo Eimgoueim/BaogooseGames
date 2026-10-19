@@ -137,6 +137,17 @@ func _run() -> void:
 		last_y = now_y
 	_check(flips <= 2, "怪物在门口后退不应来回抽动（方向翻转 %d 次）" % flips)
 
+	# ⑧ 手柄摇杆漂移不应让主角自己走（自动校准）
+	var drift := Vector2(0.02, -0.34)
+	for _i in 50:
+		dungeon.stick_value(drift)
+	var rest: Vector2 = dungeon.stick_value(drift)
+	_check(rest.length() <= 0.01, "摇杆漂移应被校准抵消，静止输出应为 0（实际 %s）" % str(rest))
+	# 真实满推时（传感器值 = 满推 + 漂移）应输出接近满速
+	var realistic_up: Vector2 = dungeon.stick_value(Vector2(0.02, -1.0 - 0.34))
+	_check(absf(realistic_up.y) > 0.9 and absf(realistic_up.x) < 0.1,
+		"真实推摇杆应输出接近满速且方向正确（实际 %s）" % str(realistic_up))
+
 	_end()
 
 func _end() -> void:
