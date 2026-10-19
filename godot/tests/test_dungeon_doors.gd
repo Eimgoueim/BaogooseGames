@@ -49,12 +49,20 @@ func _run() -> void:
 	# ① 进门无敌时间足够（防开门杀）
 	_check(float(dungeon.get("grace")) >= 1.0, "进房间的无敌时间应 >= 1.0 秒（实际 %.2f）" % float(dungeon.get("grace")))
 
-	# ② 刷怪离门口要有安全距离
+	# ② 刷怪离门口要有安全距离（多种随机布局都要满足）
 	var near_door_spawn := 0
-	for foe in room.foes:
-		if bool(dungeon.call("_near_door", Vector2(foe.x, foe.y), 14.0)):
-			near_door_spawn += 1
-	_check(near_door_spawn == 0, "敌人不应刷在门口附近（有 %d 只）" % near_door_spawn)
+	var checked_foes := 0
+	for seed_value in [11, 22, 33, 44, 55, 66, 77, 88]:
+		dungeon.rng.seed = seed_value
+		var sample_map: Dictionary = dungeon.generate_floor(1)
+		for sample_room in sample_map.values():
+			if sample_room.type != "monster": continue
+			for foe in sample_room.foes:
+				checked_foes += 1
+				if bool(dungeon.call("_near_door", Vector2(foe.x, foe.y), 14.0)):
+					near_door_spawn += 1
+	_check(checked_foes > 20, "多种子下应检查到足够多的敌人（实际 %d 只）" % checked_foes)
+	_check(near_door_spawn == 0, "敌人不应刷在门口附近（%d 只检查里发现 %d 只越界）" % [checked_foes, near_door_spawn])
 
 	# ③ 把一只敌人放在门口：它应该往房间中心退，而不是贴着门口
 	var probe := {"kind": "blob", "x": Dungeon.LOGICAL.x / 2, "y": Dungeon.WALL + 2, "hp": 99, "t": 0.0, "vx": 0.0, "vy": 0.0, "hit": 0.0}

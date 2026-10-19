@@ -261,9 +261,19 @@ func generate_floor(target_floor: int) -> Dictionary:
 			var choices := ["blob", "fly"] if int(room.dist) < 3 else ["blob", "fly", "shooter"]
 			var kind: String = choices[rng.randi_range(0, choices.size() - 1)]
 			var point := Vector2.ZERO
+			var placed := false
 			for attempt in 24:
 				point = Vector2(rng.randf_range(30, LOGICAL.x - 30), rng.randf_range(30, LOGICAL.y - 30))
-				if not _near_door(point, 22) and point.distance_to(LOGICAL * 0.5) > 26: break
+				if not _near_door(point, 22) and point.distance_to(LOGICAL * 0.5) > 26:
+					placed = true
+					break
+			if not placed:
+				# 兜底：24 次随机都没找到安全点（小地图/门多时会出现），
+				# 直接放房间中心附近，保证离门口足够远，不会开门杀
+				var back_angle := rng.randf_range(0, TAU)
+				point = LOGICAL * 0.5 + Vector2(cos(back_angle), sin(back_angle)) * rng.randf_range(28, 36)
+				point.x = clampf(point.x, WALL + 26, LOGICAL.x - WALL - 26)
+				point.y = clampf(point.y, WALL + 26, LOGICAL.y - WALL - 26)
 			room.foes.append(_new_foe(kind, point, (2 if kind == "fly" else 3) + hp_add, rng.randf_range(0, 2)))
 	return result
 
