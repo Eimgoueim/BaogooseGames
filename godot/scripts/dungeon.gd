@@ -263,7 +263,7 @@ func generate_floor(target_floor: int) -> Dictionary:
 			var point := Vector2.ZERO
 			for attempt in 24:
 				point = Vector2(rng.randf_range(30, LOGICAL.x - 30), rng.randf_range(30, LOGICAL.y - 30))
-				if not _near_door(point, 4) and point.distance_to(LOGICAL * 0.5) > 26: break
+				if not _near_door(point, 22) and point.distance_to(LOGICAL * 0.5) > 26: break
 			room.foes.append(_new_foe(kind, point, (2 if kind == "fly" else 3) + hp_add, rng.randf_range(0, 2)))
 	return result
 
@@ -463,15 +463,23 @@ func _process_foes(dt: float, room: Dictionary) -> void:
 		foe.t -= dt
 		var delta := player - Vector2(foe.x, foe.y)
 		var distance := maxf(delta.length(), 1)
-		if foe.kind == "blob":
+		# 门口安全区：在门口附近的敌人只往房间中心退，不再追玩家。
+		# 否则它会一边被推离门口、一边又追玩家，卡在墙边抖动（玩家看到的就是"卡墙上"），
+		# 而且一进门就会被贴着门的敌人打到（"开门杀"）。
+		var in_door_zone := _near_door(Vector2(foe.x, foe.y), 18.0)
+		if in_door_zone:
+			var back := LOGICAL * 0.5 - Vector2(foe.x, foe.y)
+			if back.length() > 0.01:
+				foe.x += back.normalized().x * 90 * dt
+				foe.y += back.normalized().y * 90 * dt
+		elif foe.kind == "blob":
 			foe.x += delta.x / distance * 26 * dt; foe.y += delta.y / distance * 26 * dt
 		elif foe.kind == "fly":
 			if is_zero_approx(foe.vx) and is_zero_approx(foe.vy):
 				var angle := rng.randf_range(0, TAU); foe.vx = cos(angle) * 48; foe.vy = sin(angle) * 48
 			foe.x += foe.vx * dt; foe.y += foe.vy * dt
-			if foe.x < WALL + 3 or foe.x > LOGICAL.x - WALL - 3: foe.vx *= -1
-			if foe.y < WALL + 3 or foe.y > LOGICAL.y - WALL - 3: foe.vy *= -1
-			foe.x = clampf(foe.x, WALL + 3, LOGICAL.x - WALL - 3); foe.y = clampf(foe.y, WALL + 3, LOGICAL.y - WALL - 3)
+			if foe.x < WALL + 6 or foe.x > LOGICAL.x - WALL - 6: foe.vx *= -1
+			if foe.y < WALL + 6 or foe.y > LOGICAL.y - WALL - 6: foe.vy *= -1
 		elif foe.kind == "shooter" and foe.t <= 0:
 			foe.t = 2
 			var angle := atan2(delta.y, delta.x)
@@ -485,10 +493,11 @@ func _process_foes(dt: float, room: Dictionary) -> void:
 				for i in count:
 					var angle := float(i) / count * TAU + elapsed
 					foe_shots.append({"x":foe.x, "y":foe.y, "vx":cos(angle) * speed, "vy":sin(angle) * speed, "life":3.0})
-		if _near_door(Vector2(foe.x, foe.y), 0):
-			var push := LOGICAL * 0.5 - Vector2(foe.x, foe.y)
-			foe.x += push.normalized().x * 40 * dt; foe.y += push.normalized().y * 40 * dt
-		foe.x = clampf(foe.x, WALL + 4, LOGICAL.x - WALL - 4); foe.y = clampf(foe.y, WALL + 4, LOGICAL.y - WALL - 4)
+		# 按"身体半径"把敌人夹进房间：以前只夹中心到 WALL+4，身体半径约 9px，
+		# 于是半个身子会陷进墙里（玩家看到的就是"怪卡在墙上"）
+		var body := 15.0 if foe.kind == "boss" else (6.0 if foe.kind == "fly" else 9.0)
+		foe.x = clampf(foe.x, WALL + body, LOGICAL.x - WALL - body)
+		foe.y = clampf(foe.y, WALL + body, LOGICAL.y - WALL - body)
 		var radius := 15.0 if foe.kind == "boss" else 10.0
 		if grace <= 0 and Vector2(foe.x, foe.y).distance_to(player) < radius: _hurt(1)
 		if foe.hp <= 0: _kill(foe)
@@ -570,12 +579,12 @@ func _enter(key: String, from: String) -> void:
 	if room.type == "shop" and not room.has("shop"):
 		room.shop = []
 		for i in 3: room.shop.append({"key":_random_skill(), "price":3+rng.randi_range(0,2), "bought":false})
-	grace = 0.8
+	grace = 1.6                      # 进门无敌：防止"开门杀"
 	match from:
-		"n": player = Vector2(LOGICAL.x/2, LOGICAL.y-WALL-8)
-		"s": player = Vector2(LOGICAL.x/2, WALL+8)
-		"w": player = Vector2(LOGICAL.x-WALL-8, LOGICAL.y/2)
-		"e": player = Vector2(WALL+8, LOGICAL.y/2)
+		"n": player = Vector2(LOGICAL.x/2, LOGICAL.y-WALL-14)
+		"s": player = Vector2(LOGICAL.x/2, WALL+14)
+		"w": player = Vector2(LOGICAL.x-WALL-14, LOGICAL.y/2)
+		"e": player = Vector2(WALL+14, LOGICAL.y/2)
 		_: player = LOGICAL/2
 	room.seen = true
 	_set_message("👑 第 %d 层 BOSS！" % floor if room.type == "boss" else "💎 宝箱房：金宝箱给技能" if room.type == "treasure" else "🛒 商店：走到技能上用金币买" if room.type == "shop" else "第 %d 层起点" % floor if room.type == "start" else "怪物房 · 剩 %d" % room.foes.size())
